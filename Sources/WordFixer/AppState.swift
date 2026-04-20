@@ -10,7 +10,9 @@ final class AppState {
     private let diffEngine = DiffEngine()
     let overlayPanel = OverlayPanel()
 
+    private var session: TextTargetSession?
     private var correctedText: String?
+    private var isProcessing = false
 
     init(configManager: ConfigManager) {
         self.configManager = configManager
@@ -24,55 +26,76 @@ final class AppState {
     }
 
     func trigger() {
-        Task { @MainActor in
-            textCapture.saveClipboard()
+        guard !isProcessing else { return }
+        isProcessing = true
 
-            let original: String
+        Task { @MainActor in
+            let session: TextTargetSession
             do {
-                original = try await textCapture.captureSelectedText()
+                session = try await textCapture.capture()
+                self.session = session
             } catch {
                 overlayPanel.show(state: .error(error.localizedDescription))
-                textCapture.restoreClipboard()
+                self.session = nil
                 return
             }
 
             overlayPanel.show(state: .loading)
 
-            let corrected: String
+            let correctedText: String
             do {
-                corrected = try await piInvoker.invoke(text: original, config: configManager.config)
+                correctedText = try await piInvoker.invoke(text: session.originalText, config: configManager.config)
             } catch {
                 overlayPanel.show(state: .error(error.localizedDescription))
-                textCapture.restoreClipboard()
                 return
             }
 
-            self.correctedText = corrected
-            let diff = diffEngine.computeDiff(original: original, corrected: corrected)
+            self.correctedText = correctedText
+            let diff = diffEngine.computeDiff(original: session.originalText, corrected: correctedText)
             overlayPanel.show(state: .diff(diff))
         }
     }
 
     func confirm() {
-        guard let text = correctedText else {
-            overlayPanel.hide()
+        guard let session, let correctedText else {
+            reset()
             return
         }
+
         Task { @MainActor in
-            do {
-                try await textCapture.pasteText(text)
-            } catch {
-                print("[AppState] Paste error: \(error.localizedDescription)")
-            }
-            textCapture.restoreClipboard()
-            correctedText = nil
             overlayPanel.hide()
+
+            if session.usedClipboardFallback, let sourceApp = session.sourceApp {
+                sourceApp.activate()
+                try? await Task.sleep(for: .milliseconds(200))
+            }
+
+            do {
+                try await textCapture.apply(correctedText, to: session)
+                textCapture.finish(session: session)
+            } catch {
+                textCapture.cancel(session: session)
+                overlayPanel.show(state: .error(error.localizedDescription))
+                return
+            }
+
+            session.sourceApp?.activate()
+            reset()
         }
     }
 
     func dismiss() {
-        textCapture.restoreClipboard()
-        correctedText = nil
         overlayPanel.hide()
+        if let session {
+            textCapture.cancel(session: session)
+            session.sourceApp?.activate()
+        }
+        reset()
+    }
+
+    private func reset() {
+        session = nil
+        correctedText = nil
+        isProcessing = false
     }
 }

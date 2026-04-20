@@ -10,8 +10,8 @@ struct DiffEngine {
             return AttributedString(original)
         }
 
-        let oldWords = original.components(separatedBy: " ")
-        let newWords = corrected.components(separatedBy: " ")
+        let oldWords = tokenize(original)
+        let newWords = tokenize(corrected)
 
         let diff = newWords.difference(from: oldWords)
 
@@ -65,5 +65,10 @@ struct DiffEngine {
             result.append(attr)
         }
         return result
+    }
+
+    /// Split text into tokens on any whitespace, preserving non-empty words.
+    private func tokenize(_ text: String) -> [String] {
+        text.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
     }
 }

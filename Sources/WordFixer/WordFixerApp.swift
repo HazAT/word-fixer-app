@@ -18,6 +18,15 @@ struct WordFixerApp: App {
         hotKey.keyDownHandler = { [appState = state] in
             Task { @MainActor in appState.trigger() }
         }
+
+        // Check accessibility on launch — prompt if not granted
+        Self.checkAccessibility()
+    }
+
+    private static func checkAccessibility() {
+        guard !AXIsProcessTrusted() else { return }
+        let options = [kAXTrustedCheckOptionPrompt.takeRetainedValue(): true] as CFDictionary
+        AXIsProcessTrustedWithOptions(options)
     }
 
     var body: some Scene {

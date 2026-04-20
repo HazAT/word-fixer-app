@@ -28,35 +28,34 @@ final class PiInvoker {
         let escaped = text.replacingOccurrences(of: "'", with: "'\\''")
         let command = "'\(binaryPath)' -p '\(escaped)'"
 
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        process.arguments = ["-c", command]
+        process.environment = [
+            "PI_CODING_AGENT_DIR": piDir,
+            "PATH": ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin",
+            "HOME": ProcessInfo.processInfo.environment["HOME"] ?? ""
+        ]
+
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardOutput = stdout
+        process.standardError = stderr
+
         return try await withThrowingTaskGroup(of: String.self) { group in
             group.addTask {
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-                process.arguments = ["-c", command]
-                process.environment = [
-                    "PI_CODING_AGENT_DIR": piDir,
-                    "PATH": ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin",
-                    "HOME": ProcessInfo.processInfo.environment["HOME"] ?? ""
-                ]
-
-                let stdout = Pipe()
-                let stderr = Pipe()
-                process.standardOutput = stdout
-                process.standardError = stderr
-
                 try process.run()
-                process.waitUntilExit()
-
+                // Read pipes BEFORE waitUntilExit to avoid deadlock on large output
                 let outData = stdout.fileHandleForReading.readDataToEndOfFile()
                 let errData = stderr.fileHandleForReading.readDataToEndOfFile()
+                process.waitUntilExit()
 
                 guard process.terminationStatus == 0 else {
                     let errStr = String(data: errData, encoding: .utf8) ?? "Unknown error"
                     throw PiError.executionFailed(errStr)
                 }
 
-                let result = String(data: outData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                return result
+                return String(data: outData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             }
 
             group.addTask {
@@ -64,9 +63,11 @@ final class PiInvoker {
                 throw PiError.timeout
             }
 
-            let result = try await group.next()!
-            group.cancelAll()
-            return result
+            defer {
+                group.cancelAll()
+                if process.isRunning { process.terminate() }
+            }
+            return try await group.next()!
         }
     }
 }
