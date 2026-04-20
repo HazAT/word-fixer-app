@@ -5,6 +5,7 @@ struct WordFixerApp: App {
     let configManager = ConfigManager()
     let textCapture = TextCapture()
     let piInvoker = PiInvoker()
+    let overlayPanel = OverlayPanel()
 
     var body: some Scene {
         MenuBarExtra("Word Fixer", systemImage: "textformat.abc") {
@@ -43,6 +44,22 @@ struct WordFixerApp: App {
                 print("[DiffEngine] Test 2: \(diff2)")
                 print("[DiffEngine] Test 3: \(diff3)")
                 print("[DiffEngine] Test 4: \(diff4)")
+            }
+            Button("Test Overlay") {
+                let diffEngine = DiffEngine()
+                let diff = diffEngine.computeDiff(
+                    original: "I havve a speling eror in this sentance and it needs too be fixd",
+                    corrected: "I have a spelling error in this sentence and it needs to be fixed"
+                )
+                overlayPanel.onConfirm = {
+                    print("[Overlay] Confirm pressed")
+                    overlayPanel.hide()
+                }
+                overlayPanel.onDismiss = {
+                    print("[Overlay] Dismiss pressed")
+                    overlayPanel.hide()
+                }
+                overlayPanel.show(state: .diff(diff))
             }
             Divider()
             Button("Quit") {
