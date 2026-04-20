@@ -1,65 +1,30 @@
 import SwiftUI
+import HotKey
 
 @main
 struct WordFixerApp: App {
     let configManager = ConfigManager()
-    let textCapture = TextCapture()
-    let piInvoker = PiInvoker()
-    let overlayPanel = OverlayPanel()
+    let appState: AppState
+    let hotKey: HotKey
+
+    init() {
+        let config = configManager
+        let state = AppState(configManager: config)
+        self.appState = state
+
+        let key = Self.mapKey(config.config.shortcutKey)
+        let modifiers = Self.mapModifiers(config.config.shortcutModifiers)
+        hotKey = HotKey(key: key, modifiers: modifiers)
+        hotKey.keyDownHandler = { [appState = state] in
+            Task { @MainActor in appState.trigger() }
+        }
+    }
 
     var body: some Scene {
         MenuBarExtra("Word Fixer", systemImage: "textformat.abc") {
-            Button("Test Capture") {
-                Task {
-                    textCapture.saveClipboard()
-                    do {
-                        let text = try await textCapture.captureSelectedText()
-                        print("[TextCapture] Captured text: \(text)")
-                    } catch {
-                        print("[TextCapture] Error: \(error.localizedDescription)")
-                    }
-                    textCapture.restoreClipboard()
-                }
-            }
-            Button("Test Pi") {
-                Task {
-                    do {
-                        let result = try await piInvoker.invoke(
-                            text: "I havve a speling eror in this sentance",
-                            config: configManager.config
-                        )
-                        print("[PiInvoker] Result: \(result)")
-                    } catch {
-                        print("[PiInvoker] Error: \(error.localizedDescription)")
-                    }
-                }
-            }
-            Button("Test Diff") {
-                let engine = DiffEngine()
-                let diff1 = engine.computeDiff(original: "teh quick brown fox", corrected: "the quick brown fox")
-                let diff2 = engine.computeDiff(original: "hello world", corrected: "hello beautiful world")
-                let diff3 = engine.computeDiff(original: "remove this word", corrected: "remove word")
-                let diff4 = engine.computeDiff(original: "same text", corrected: "same text")
-                print("[DiffEngine] Test 1: \(diff1)")
-                print("[DiffEngine] Test 2: \(diff2)")
-                print("[DiffEngine] Test 3: \(diff3)")
-                print("[DiffEngine] Test 4: \(diff4)")
-            }
-            Button("Test Overlay") {
-                let diffEngine = DiffEngine()
-                let diff = diffEngine.computeDiff(
-                    original: "I havve a speling eror in this sentance and it needs too be fixd",
-                    corrected: "I have a spelling error in this sentence and it needs to be fixed"
-                )
-                overlayPanel.onConfirm = {
-                    print("[Overlay] Confirm pressed")
-                    overlayPanel.hide()
-                }
-                overlayPanel.onDismiss = {
-                    print("[Overlay] Dismiss pressed")
-                    overlayPanel.hide()
-                }
-                overlayPanel.show(state: .diff(diff))
+            Button("About") {
+                let path = ConfigManager.configFile.path
+                NSAlert.runModal(message: "Word Fixer", info: "Config: \(path)")
             }
             Divider()
             Button("Quit") {
@@ -67,5 +32,60 @@ struct WordFixerApp: App {
             }
             .keyboardShortcut("q")
         }
+    }
+
+    private static func mapKey(_ key: String) -> Key {
+        switch key.lowercased() {
+        case "a": return .a
+        case "b": return .b
+        case "c": return .c
+        case "d": return .d
+        case "e": return .e
+        case "f": return .f
+        case "g": return .g
+        case "h": return .h
+        case "i": return .i
+        case "j": return .j
+        case "k": return .k
+        case "l": return .l
+        case "m": return .m
+        case "n": return .n
+        case "o": return .o
+        case "p": return .p
+        case "q": return .q
+        case "r": return .r
+        case "s": return .s
+        case "t": return .t
+        case "u": return .u
+        case "v": return .v
+        case "w": return .w
+        case "x": return .x
+        case "y": return .y
+        case "z": return .z
+        default: return .c
+        }
+    }
+
+    private static func mapModifiers(_ modifiers: [String]) -> NSEvent.ModifierFlags {
+        var flags: NSEvent.ModifierFlags = []
+        for mod in modifiers {
+            switch mod.lowercased() {
+            case "command": flags.insert(.command)
+            case "shift": flags.insert(.shift)
+            case "option", "alt": flags.insert(.option)
+            case "control", "ctrl": flags.insert(.control)
+            default: break
+            }
+        }
+        return flags
+    }
+}
+
+private extension NSAlert {
+    static func runModal(message: String, info: String) {
+        let alert = NSAlert()
+        alert.messageText = message
+        alert.informativeText = info
+        alert.runModal()
     }
 }
