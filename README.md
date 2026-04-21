@@ -25,6 +25,47 @@ make build
 make run
 ```
 
+## Package as a real app
+
+Build a release `.app` bundle:
+
+```bash
+make package
+```
+
+That creates:
+
+```text
+dist/Word Fixer.app
+```
+
+Open it directly:
+
+```bash
+make open
+```
+
+## Install
+
+Install for the current user:
+
+```bash
+make install
+```
+
+Install into `/Applications`:
+
+```bash
+make install-system
+```
+
+Or run the script directly:
+
+```bash
+./scripts/install.sh --open
+./scripts/install.sh --system --open
+```
+
 ## Usage
 
 1. Select text in any supported app

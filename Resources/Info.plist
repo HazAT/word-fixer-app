@@ -5,9 +5,15 @@
     <key>LSUIElement</key>
     <true/>
     <key>CFBundleName</key>
+    <string>Word Fixer</string>
+    <key>CFBundleDisplayName</key>
+    <string>Word Fixer</string>
+    <key>CFBundleExecutable</key>
     <string>WordFixer</string>
     <key>CFBundleIdentifier</key>
     <string>com.wordfixer.app</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>CFBundleShortVersionString</key>

@@ -1,4 +1,5 @@
 .build/
 .pi/
+dist/
 *.o
 *.d
