@@ -42,6 +42,13 @@ enum TextCaptureError: Error, LocalizedError {
 }
 
 final class TextCapture {
+    private enum Timing {
+        static let clipboardCopySetup: Duration = .milliseconds(100)
+        static let clipboardPoll: Duration = .milliseconds(50)
+        static let clipboardWriteSetup: Duration = .milliseconds(75)
+        static let clipboardApplySettle: Duration = .milliseconds(750)
+    }
+
     private var savedClipboardItems: [[(String, Data)]]?
 
     func capture() async throws -> TextTargetSession {
@@ -78,12 +85,12 @@ final class TextCapture {
     }
 
     func cancel(session: TextTargetSession?) {
-        guard let session, session.usedClipboardFallback || session.applyStrategy == .clipboard else { return }
+        guard shouldRestoreClipboard(for: session) else { return }
         restoreClipboard()
     }
 
     func finish(session: TextTargetSession?) {
-        guard let session, session.usedClipboardFallback || session.applyStrategy == .clipboard else { return }
+        guard shouldRestoreClipboard(for: session) else { return }
         restoreClipboard()
     }
 
@@ -114,21 +121,12 @@ final class TextCapture {
                 preferredRange: selectedRange,
                 fullValue: fullValue
             )
-            let context = selectionContext(in: fullValue, range: resolvedRange)
-            return TextTargetSession(
+            return buildAccessibilitySession(
                 originalText: selectedText,
                 sourceApp: sourceApp,
                 element: element,
                 selectedRange: resolvedRange,
-                prefixContext: context.prefix,
-                suffixContext: context.suffix,
-                applyStrategy: chooseApplyStrategy(
-                    sourceApp: sourceApp,
-                    selectedText: selectedText,
-                    selectedRange: resolvedRange,
-                    fullValue: fullValue
-                ),
-                usedClipboardFallback: false
+                fullValue: fullValue
             )
         }
 
@@ -140,21 +138,12 @@ final class TextCapture {
             return nil
         }
 
-        let context = selectionContext(in: fullValue, range: selectedRange)
-        return TextTargetSession(
+        return buildAccessibilitySession(
             originalText: selectedText,
             sourceApp: sourceApp,
             element: element,
             selectedRange: selectedRange,
-            prefixContext: context.prefix,
-            suffixContext: context.suffix,
-            applyStrategy: chooseApplyStrategy(
-                sourceApp: sourceApp,
-                selectedText: selectedText,
-                selectedRange: selectedRange,
-                fullValue: fullValue
-            ),
-            usedClipboardFallback: false
+            fullValue: fullValue
         )
     }
 
@@ -259,7 +248,7 @@ final class TextCapture {
     private func captureFromClipboardFallback(sourceApp: NSRunningApplication?) async throws -> TextTargetSession {
         saveClipboard()
 
-        try await Task.sleep(for: .milliseconds(100))
+        try await Task.sleep(for: Timing.clipboardCopySetup)
 
         let pasteboard = NSPasteboard.general
         let initialChangeCount = pasteboard.changeCount
@@ -268,7 +257,7 @@ final class TextCapture {
 
         var capturedText: String?
         for _ in 0..<20 {
-            try await Task.sleep(for: .milliseconds(50))
+            try await Task.sleep(for: Timing.clipboardPoll)
             if pasteboard.changeCount > initialChangeCount {
                 capturedText = pasteboard.string(forType: .string)
                 if let capturedText, !capturedText.isEmpty {
@@ -298,9 +287,33 @@ final class TextCapture {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
-        try await Task.sleep(for: .milliseconds(75))
+        try await Task.sleep(for: Timing.clipboardWriteSetup)
         simulatePaste()
-        try await Task.sleep(for: .milliseconds(750))
+        try await Task.sleep(for: Timing.clipboardApplySettle)
+    }
+
+    private func shouldRestoreClipboard(for session: TextTargetSession?) -> Bool {
+        guard let session else { return false }
+        return session.usedClipboardFallback || session.applyStrategy == .clipboard
+    }
+
+    private func buildAccessibilitySession(originalText: String, sourceApp: NSRunningApplication?, element: AXUIElement, selectedRange: CFRange, fullValue: String?) -> TextTargetSession {
+        let context = selectionContext(in: fullValue, range: selectedRange)
+        return TextTargetSession(
+            originalText: originalText,
+            sourceApp: sourceApp,
+            element: element,
+            selectedRange: selectedRange,
+            prefixContext: context.prefix,
+            suffixContext: context.suffix,
+            applyStrategy: chooseApplyStrategy(
+                sourceApp: sourceApp,
+                selectedText: originalText,
+                selectedRange: selectedRange,
+                fullValue: fullValue
+            ),
+            usedClipboardFallback: false
+        )
     }
 
     private func saveClipboard() {
