@@ -192,7 +192,11 @@ actor PiHelperClient {
     private func pipeOutput(_ handle: FileHandle, prefix: String) {
         handle.readabilityHandler = { fileHandle in
             let data = fileHandle.availableData
-            guard !data.isEmpty, let string = String(data: data, encoding: .utf8) else {
+            guard !data.isEmpty else {
+                fileHandle.readabilityHandler = nil
+                return
+            }
+            guard let string = String(data: data, encoding: .utf8) else {
                 return
             }
             for line in string.split(whereSeparator: { $0.isNewline }) {
