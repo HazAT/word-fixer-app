@@ -50,7 +50,7 @@ Typical actions:
 | Condition | Action |
 |---|---|
 | `pi` missing | Tell the user Word Fixer depends on an installed Pi runtime and ask them to install/configure `pi` first |
-| Word Fixer config missing | Build or install the app so first-run bootstrap can create config, or explain where the config will appear |
+| Word Fixer config missing | Offer to run `make install`, `make install-system`, or launch the app once so config can be bootstrapped with the detected `pi` path |
 | Word Fixer auth missing but global `~/.pi/auth.json` exists | Offer to copy global auth into `~/.config/word-fixer/.pi/auth.json` |
 | App not installed | Offer to run `make install` or `make reinstall` |
 | Installed app path exists but user is testing from mixed locations | Recommend using the installed app path consistently |
@@ -63,7 +63,7 @@ Do not perform file copies, config edits, or installation until the user agrees.
 After the user approves, perform only the agreed actions.
 
 Allowed actions include:
-- run `swift build`, `make build`, `make install`, or `make reinstall`
+- run `swift build`, `make build`, `make install`, `make install-system`, or `make reinstall`
 - create `~/.config/word-fixer/.pi/` if needed
 - copy `~/.pi/auth.json` to `~/.config/word-fixer/.pi/auth.json` if the user approved it
 - show the current config file and explain fields
@@ -91,7 +91,7 @@ Check:
 - the app builds successfully if you ran a build
 - the installed app exists if you ran install
 - the config directory exists
-- `config.json` exists
+- `config.json` exists and `piBinaryPath` points at the detected `pi` binary when install/bootstrap was part of the workflow
 - `~/.config/word-fixer/.pi/SYSTEM.md` exists
 - `~/.config/word-fixer/.pi/auth.json` exists when auth is required
 

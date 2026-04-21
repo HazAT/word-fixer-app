@@ -124,16 +124,18 @@ Default config:
 {
   "shortcutKey": "c",
   "shortcutModifiers": ["command", "shift"],
-  "piBinaryPath": "/Users/haza/.vite-plus/js_runtime/node/24.15.0/bin/pi",
+  "piBinaryPath": "/absolute/path/to/pi",
   "debugLogging": true
 }
 ```
+
+`make install` and `make install-system` now detect `pi` with `command -v pi` and write that resolved path into `~/.config/word-fixer/config.json` when bootstrapping the config. First launch also re-detects `pi` if the config still contains the old hardcoded path or points to a missing binary.
 
 Config fields:
 
 - `shortcutKey` — global hotkey key
 - `shortcutModifiers` — global hotkey modifiers
-- `piBinaryPath` — path to the `pi` installation; Word Fixer uses this to find the adjacent Node runtime and Pi SDK
+- `piBinaryPath` — absolute path to the `pi` installation; Word Fixer uses this to find the adjacent Node runtime and Pi SDK
 - `debugLogging` — enables verbose logging to `~/.config/word-fixer/debug.log`
 
 ### `pi` environment
