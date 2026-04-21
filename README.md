@@ -25,6 +25,16 @@ make build
 make run
 ```
 
+## App icon
+
+The app icon is generated from `Resources/logo.svg` into `Resources/AppIcon.icns`.
+
+Rebuild it manually with:
+
+```bash
+make icon
+```
+
 ## Package as a real app
 
 Build a release `.app` bundle:

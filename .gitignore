@@ -1,5 +1,8 @@
 .build/
 .pi/
 dist/
+.DS_Store
+Resources/AppIcon.icns
+Resources/AppIcon.iconset/
 *.o
 *.d

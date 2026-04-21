@@ -12,6 +12,8 @@
     <string>WordFixer</string>
     <key>CFBundleIdentifier</key>
     <string>com.wordfixer.app</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleVersion</key>

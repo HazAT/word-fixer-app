@@ -1,10 +1,13 @@
-.PHONY: build run clean package install install-system open
+.PHONY: build run clean icon package install install-system reinstall open
 
 build:
 	swift build
 
 run:
 	swift run
+
+icon:
+	./scripts/build-icon.sh
 
 package:
 	./scripts/package-app.sh
@@ -14,6 +17,9 @@ install:
 
 install-system:
 	./scripts/install.sh --system
+
+reinstall:
+	./scripts/install.sh --open
 
 open:
 	open "dist/Word Fixer.app"
