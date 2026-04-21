@@ -9,7 +9,7 @@ Select text in almost any app, press **⌘⇧C**, review an inline diff in a Spo
 - Runs as a menu bar app with no dock icon
 - Uses a global shortcut (**⌘⇧C** by default)
 - Captures selected text from the currently focused app
-- Sends that text to `pi`
+- Sends that text to a local helper that uses the `pi` SDK
 - Shows the corrected result as an inline diff
 - Replaces the original selection on confirmation
 - Keeps all `pi` behavior configurable in the filesystem
@@ -21,9 +21,10 @@ Word Fixer is **Accessibility-first**.
 Primary path:
 1. Read the focused text element via macOS Accessibility APIs
 2. Capture its selected text and selected range
-3. Send the selected text to `pi --no-tools`
-4. Show the diff overlay
-5. Write the corrected text back to the same element/range
+3. Send the selected text to a local Node helper on loopback HTTP
+4. The helper creates a fresh in-memory `pi` SDK session for the request
+5. Show the diff overlay
+6. Write the corrected text back to the same element/range
 
 Fallback path:
 - If the focused app does not expose usable text attributes through Accessibility, Word Fixer falls back to simulated copy/paste via the clipboard
@@ -121,9 +122,17 @@ Default config:
 {
   "shortcutKey": "c",
   "shortcutModifiers": ["command", "shift"],
-  "piBinaryPath": "/Users/haza/.vite-plus/js_runtime/node/24.15.0/bin/pi"
+  "piBinaryPath": "/Users/haza/.vite-plus/js_runtime/node/24.15.0/bin/pi",
+  "debugLogging": true
 }
 ```
+
+Config fields:
+
+- `shortcutKey` — global hotkey key
+- `shortcutModifiers` — global hotkey modifiers
+- `piBinaryPath` — path to the `pi` installation; Word Fixer uses this to find the adjacent Node runtime and Pi SDK
+- `debugLogging` — enables verbose logging to `~/.config/word-fixer/debug.log`
 
 ### `pi` environment
 
@@ -199,17 +208,45 @@ Sources/WordFixer/
 ├── WordFixerApp.swift    # app entry point, menu bar, hotkey setup
 ├── AppState.swift        # session orchestration and UI flow
 ├── TextCapture.swift     # AX-first capture/apply, clipboard fallback
-├── PiInvoker.swift       # pi process execution
+├── PiInvoker.swift       # correction transport entry point
+├── PiHelperClient.swift  # helper supervision + local HTTP client
 ├── DiffEngine.swift      # inline diff generation
 ├── OverlayPanel.swift    # AppKit panel container
 ├── OverlayView.swift     # SwiftUI overlay UI
+├── DebugLog.swift        # optional debug logging
 └── ConfigManager.swift   # config + .pi bootstrap
+
+helper/
+├── word-fixer-helper.mjs # local HTTP helper process
+└── helper-lib.mjs        # Pi SDK session/config integration
 ```
+
+## Transport architecture
+
+Word Fixer no longer keeps a long-lived `pi` CLI subprocess open from Swift.
+
+Current runtime model:
+
+```text
+Swift app
+  -> local Node helper on 127.0.0.1
+  -> direct @mariozechner/pi-coding-agent SDK session
+```
+
+Details:
+
+- Swift owns capture/apply, overlay UI, helper supervision, and timeout/cancel UX
+- The helper owns Pi SDK initialization and prompting
+- Each fix request creates a fresh in-memory SDK session
+- The helper writes its current port to:
+  - `~/.config/word-fixer/helper.json`
+- The installed app bundle includes the helper runtime under app resources
 
 ## Development notes
 
 - The app is a Swift Package Manager executable, not an Xcode project
-- It depends only on [`HotKey`](https://github.com/soffes/HotKey)
+- The Swift app depends only on [`HotKey`](https://github.com/soffes/HotKey)
+- The transport helper is plain Node `.mjs` code and uses the installed Pi SDK resolved from `piBinaryPath`
 - The app icon is generated from `Resources/logo.svg`
 
 Rebuild the icon manually:
