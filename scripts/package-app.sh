@@ -34,9 +34,4 @@ if [[ -f "$ICON_SOURCE" ]]; then
 fi
 chmod +x "$MACOS_DIR/$EXECUTABLE_NAME"
 
-# Ad-hoc sign so the bundle behaves like a normal app locally.
-if command -v codesign >/dev/null 2>&1; then
-  codesign --force --deep --sign - "$APP_DIR" >/dev/null 2>&1 || true
-fi
-
 echo "$APP_DIR"

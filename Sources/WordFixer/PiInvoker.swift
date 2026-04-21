@@ -26,7 +26,7 @@ final class PiInvoker {
 
         let piDir = ConfigManager.piDir.path
         let escaped = text.replacingOccurrences(of: "'", with: "'\\''")
-        let command = "'\(binaryPath)' -p '\(escaped)'"
+        let command = "'\(binaryPath)' --no-tools -p '\(escaped)'"
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
