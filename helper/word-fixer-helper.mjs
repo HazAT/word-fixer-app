@@ -123,8 +123,8 @@ async function handleRequest(request, response) {
       cwd,
       log: logger,
     });
-    await logger.log('fix complete', { durationMs: Date.now() - startedAt, inputLength: text.length, outputLength: fixed.length });
-    sendJson(response, 200, { ok: true, text: fixed });
+    await logger.log('fix complete', { durationMs: Date.now() - startedAt, inputLength: text.length, outputLength: fixed.text.length, cost: fixed.cost });
+    sendJson(response, 200, { ok: true, text: fixed.text, cost: fixed.cost });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await logger.log('request failed', { url: request.url, error: message });

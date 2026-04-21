@@ -17,6 +17,11 @@ enum PiError: Error, LocalizedError {
     }
 }
 
+struct PiInvocationResult {
+    let text: String
+    let cost: Double?
+}
+
 actor PiInvoker {
     private let helperClient = PiHelperClient()
 
@@ -24,10 +29,11 @@ actor PiInvoker {
         await helperClient.prewarm(config: config)
     }
 
-    func invoke(text: String, config: AppConfig) async throws -> String {
+    func invoke(text: String, config: AppConfig) async throws -> PiInvocationResult {
         DebugLog.write("PiInvoker.invoke start inputLength=\(text.count)")
-        let output = try await helperClient.fix(text: text, config: config)
-        DebugLog.write("PiInvoker.invoke success outputLength=\(output.count)")
-        return output
+        let result = try await helperClient.fix(text: text, config: config)
+        let costDescription = result.cost.map { String($0) } ?? "nil"
+        DebugLog.write("PiInvoker.invoke success outputLength=\(result.text.count) cost=\(costDescription)")
+        return result
     }
 }

@@ -20,7 +20,7 @@ actor PiHelperClient {
         }
     }
 
-    func fix(text: String, config: AppConfig) async throws -> String {
+    func fix(text: String, config: AppConfig) async throws -> PiInvocationResult {
         let state = try await ensureRunning(config: config)
         let url = URL(string: "http://127.0.0.1:\(state.port)/fix")!
         let response = try await post(url: url, body: ["text": text], timeout: requestTimeout)
@@ -30,7 +30,7 @@ actor PiHelperClient {
         guard let output = response.text else {
             throw PiError.executionFailed("Helper returned no corrected text.")
         }
-        return output
+        return PiInvocationResult(text: output, cost: response.cost)
     }
 
     func shutdown() async {
@@ -214,6 +214,7 @@ private struct HelperResponse: Decodable {
     let ready: Bool?
     let pid: Int32?
     let text: String?
+    let cost: Double?
     let error: String?
 }
 

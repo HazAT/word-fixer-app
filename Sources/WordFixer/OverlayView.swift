@@ -2,7 +2,7 @@ import SwiftUI
 
 enum OverlayState {
     case loading
-    case diff(AttributedString)
+    case diff(AttributedString, cost: Double?)
     case error(String)
 }
 
@@ -24,7 +24,7 @@ struct OverlayView: View {
                             .foregroundStyle(.secondary)
                     }
 
-                case .diff(let attributed):
+                case .diff(let attributed, let cost):
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Word Fixer")
                             .font(.headline)
@@ -33,12 +33,17 @@ struct OverlayView: View {
                             .font(.body)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    HStack {
-                        Spacer()
+                    VStack(alignment: .trailing, spacing: 2) {
                         Text("↩ Confirm · Esc Dismiss")
                             .font(.caption)
                             .foregroundStyle(.tertiary)
+                        if let cost {
+                            Text("Cost \(formatCost(cost))")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
                     }
+                    .frame(maxWidth: .infinity, alignment: .trailing)
 
                 case .error(let message):
                     Label(message, systemImage: "exclamationmark.triangle")
@@ -48,5 +53,10 @@ struct OverlayView: View {
             .padding(20)
         }
         .frame(width: 500)
+    }
+
+    private func formatCost(_ cost: Double) -> String {
+        let format = cost < 0.001 ? "%.6f" : "%.4f"
+        return String(format: "$" + format, cost)
     }
 }

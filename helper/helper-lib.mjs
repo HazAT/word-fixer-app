@@ -97,6 +97,7 @@ export async function fixText({ services, text, cwd, log }) {
 
   let assistantText = '';
   let completedText = '';
+  let cost;
   const unsubscribe = session.subscribe((event) => {
     if (event.type === 'message_update' && event.assistantMessageEvent?.type === 'text_delta') {
       assistantText += event.assistantMessageEvent.delta;
@@ -106,6 +107,9 @@ export async function fixText({ services, text, cwd, log }) {
         .filter((item) => item.type === 'text')
         .map((item) => item.text)
         .join('');
+      if (event.message.stopReason !== 'aborted' && event.message.stopReason !== 'error') {
+        cost = event.message.usage?.cost?.total;
+      }
     }
   });
 
@@ -118,7 +122,7 @@ export async function fixText({ services, text, cwd, log }) {
     if (!result) {
       throw new Error('Pi returned no corrected text.');
     }
-    return result;
+    return { text: result, cost };
   } finally {
     unsubscribe();
     session.dispose();

@@ -12,6 +12,7 @@ final class AppState {
 
     private var session: TextTargetSession?
     private var correctedText: String?
+    private var invocationCost: Double?
     private var isProcessing = false
     private var isApplying = false
     private var currentInvocationTask: Task<Void, Never>?
@@ -67,10 +68,11 @@ final class AppState {
             DebugLog.write("overlay loading shown")
             overlayPanel.show(state: .loading)
 
-            let correctedText: String
+            let invocation: PiInvocationResult
             do {
-                correctedText = try await piInvoker.invoke(text: session.originalText, config: configManager.config)
-                DebugLog.write("pi invoke success outputLength=\(correctedText.count)")
+                invocation = try await piInvoker.invoke(text: session.originalText, config: configManager.config)
+                let costDescription = invocation.cost.map { String($0) } ?? "nil"
+                DebugLog.write("pi invoke success outputLength=\(invocation.text.count) cost=\(costDescription)")
             } catch is CancellationError {
                 DebugLog.write("pi invoke cancelled")
                 currentInvocationTask = nil
@@ -85,10 +87,11 @@ final class AppState {
             }
 
             currentInvocationTask = nil
-            self.correctedText = correctedText
-            let diff = diffEngine.computeDiff(original: session.originalText, corrected: correctedText)
+            self.correctedText = invocation.text
+            self.invocationCost = invocation.cost
+            let diff = diffEngine.computeDiff(original: session.originalText, corrected: invocation.text)
             DebugLog.write("overlay diff shown")
-            overlayPanel.show(state: .diff(diff))
+            overlayPanel.show(state: .diff(diff, cost: invocation.cost))
         }
     }
 
@@ -149,6 +152,7 @@ final class AppState {
         currentInvocationTask = nil
         session = nil
         correctedText = nil
+        invocationCost = nil
         isProcessing = false
         isApplying = false
     }
