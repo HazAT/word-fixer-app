@@ -1,5 +1,7 @@
 # Word Fixer
 
+https://github.com/user-attachments/assets/49385317-fbf7-4dac-b86a-926a70f3a979
+
 Word Fixer is a tiny macOS menu bar app that fixes selected text with `pi`.
 
 Select text in almost any app, press **⌘⇧C**, review an inline diff in a Spotlight-like overlay, then press **Enter** to apply the correction or **Escape** to cancel.
