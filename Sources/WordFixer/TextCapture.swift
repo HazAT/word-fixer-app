@@ -2,11 +2,19 @@ import AppKit
 import Carbon
 import Foundation
 
+enum ApplyStrategy {
+    case accessibility
+    case clipboard
+}
+
 struct TextTargetSession {
     let originalText: String
     let sourceApp: NSRunningApplication?
     let element: AXUIElement?
     let selectedRange: CFRange?
+    let prefixContext: String
+    let suffixContext: String
+    let applyStrategy: ApplyStrategy
     let usedClipboardFallback: Bool
 }
 
@@ -48,25 +56,34 @@ final class TextCapture {
     }
 
     func apply(_ correctedText: String, to session: TextTargetSession) async throws {
-        if let element = session.element, let selectedRange = session.selectedRange {
+        switch session.applyStrategy {
+        case .accessibility:
+            guard let element = session.element, let selectedRange = session.selectedRange else {
+                throw TextCaptureError.replacementFailed
+            }
             try replaceViaAccessibility(
                 correctedText,
+                originalText: session.originalText,
+                prefixContext: session.prefixContext,
+                suffixContext: session.suffixContext,
                 element: element,
                 selectedRange: selectedRange
             )
-            return
+        case .clipboard:
+            if savedClipboardItems == nil {
+                saveClipboard()
+            }
+            try await pasteViaClipboardFallback(correctedText)
         }
-
-        try await pasteViaClipboardFallback(correctedText)
     }
 
     func cancel(session: TextTargetSession?) {
-        guard let session, session.usedClipboardFallback else { return }
+        guard let session, session.usedClipboardFallback || session.applyStrategy == .clipboard else { return }
         restoreClipboard()
     }
 
     func finish(session: TextTargetSession?) {
-        guard let session, session.usedClipboardFallback else { return }
+        guard let session, session.usedClipboardFallback || session.applyStrategy == .clipboard else { return }
         restoreClipboard()
     }
 
@@ -84,50 +101,91 @@ final class TextCapture {
             return nil
         }
 
-        if let selectedText = copyStringAttribute(element, attribute: kAXSelectedTextAttribute as CFString),
+        let selectedTextAttribute = copyStringAttribute(element, attribute: kAXSelectedTextAttribute as CFString)
+        let selectedRangeAttribute = copyRangeAttribute(element, attribute: kAXSelectedTextRangeAttribute as CFString)
+        let fullValue = copyStringAttribute(element, attribute: kAXValueAttribute as CFString)
+
+        if let selectedText = selectedTextAttribute,
            !selectedText.isEmpty,
-           let selectedRange = copyRangeAttribute(element, attribute: kAXSelectedTextRangeAttribute as CFString),
+           let selectedRange = selectedRangeAttribute,
            selectedRange.length > 0 {
+            let resolvedRange = resolvedSelectedRange(
+                selectedText: selectedText,
+                preferredRange: selectedRange,
+                fullValue: fullValue
+            )
+            let context = selectionContext(in: fullValue, range: resolvedRange)
             return TextTargetSession(
                 originalText: selectedText,
                 sourceApp: sourceApp,
                 element: element,
-                selectedRange: selectedRange,
+                selectedRange: resolvedRange,
+                prefixContext: context.prefix,
+                suffixContext: context.suffix,
+                applyStrategy: chooseApplyStrategy(
+                    sourceApp: sourceApp,
+                    selectedText: selectedText,
+                    selectedRange: resolvedRange,
+                    fullValue: fullValue
+                ),
                 usedClipboardFallback: false
             )
         }
 
-        guard let selectedRange = copyRangeAttribute(element, attribute: kAXSelectedTextRangeAttribute as CFString),
+        guard let selectedRange = selectedRangeAttribute,
               selectedRange.length > 0,
-              let fullValue = copyStringAttribute(element, attribute: kAXValueAttribute as CFString),
+              let fullValue,
               let selectedText = substring(fullValue, range: selectedRange),
               !selectedText.isEmpty else {
             return nil
         }
 
+        let context = selectionContext(in: fullValue, range: selectedRange)
         return TextTargetSession(
             originalText: selectedText,
             sourceApp: sourceApp,
             element: element,
             selectedRange: selectedRange,
+            prefixContext: context.prefix,
+            suffixContext: context.suffix,
+            applyStrategy: chooseApplyStrategy(
+                sourceApp: sourceApp,
+                selectedText: selectedText,
+                selectedRange: selectedRange,
+                fullValue: fullValue
+            ),
             usedClipboardFallback: false
         )
     }
 
-    private func replaceViaAccessibility(_ correctedText: String, element: AXUIElement, selectedRange: CFRange) throws {
+    private func replaceViaAccessibility(_ correctedText: String, originalText: String, prefixContext: String, suffixContext: String, element: AXUIElement, selectedRange: CFRange) throws {
+        let replacementText = normalizeLineEndings(in: correctedText, toMatch: copyStringAttribute(element, attribute: kAXValueAttribute as CFString) ?? correctedText)
+
+        if try replaceSelectedTextAttribute(replacementText, originalText: originalText, element: element, selectedRange: selectedRange) {
+            return
+        }
+
         guard let fullValue = copyStringAttribute(element, attribute: kAXValueAttribute as CFString) else {
             throw TextCaptureError.replacementFailed
         }
 
+        let resolvedRange = resolvedSelectedRange(
+            selectedText: originalText,
+            preferredRange: selectedRange,
+            fullValue: fullValue,
+            prefixContext: prefixContext,
+            suffixContext: suffixContext
+        )
+
         let nsValue = fullValue as NSString
-        let nsRange = NSRange(location: selectedRange.location, length: selectedRange.length)
+        let nsRange = NSRange(location: resolvedRange.location, length: resolvedRange.length)
         guard nsRange.location >= 0,
               nsRange.length >= 0,
               nsRange.location + nsRange.length <= nsValue.length else {
             throw TextCaptureError.replacementFailed
         }
 
-        let updatedValue = nsValue.replacingCharacters(in: nsRange, with: correctedText)
+        let updatedValue = nsValue.replacingCharacters(in: nsRange, with: replacementText)
         let setValueResult = AXUIElementSetAttributeValue(
             element,
             kAXValueAttribute as CFString,
@@ -137,7 +195,7 @@ final class TextCapture {
             throw TextCaptureError.replacementFailed
         }
 
-        var updatedRange = CFRange(location: selectedRange.location, length: (correctedText as NSString).length)
+        var updatedRange = CFRange(location: resolvedRange.location, length: (replacementText as NSString).length)
         if let rangeValue = AXValueCreate(.cfRange, &updatedRange) {
             _ = AXUIElementSetAttributeValue(
                 element,
@@ -145,6 +203,57 @@ final class TextCapture {
                 rangeValue
             )
         }
+    }
+
+    private func replaceSelectedTextAttribute(_ replacementText: String, originalText: String, element: AXUIElement, selectedRange: CFRange) throws -> Bool {
+        var writable = DarwinBoolean(false)
+        let settableResult = AXUIElementIsAttributeSettable(
+            element,
+            kAXSelectedTextAttribute as CFString,
+            &writable
+        )
+        guard settableResult == .success, writable.boolValue else {
+            return false
+        }
+
+        let beforeValue = copyStringAttribute(element, attribute: kAXValueAttribute as CFString)
+
+        var range = selectedRange
+        if let rangeValue = AXValueCreate(.cfRange, &range) {
+            _ = AXUIElementSetAttributeValue(
+                element,
+                kAXSelectedTextRangeAttribute as CFString,
+                rangeValue
+            )
+        }
+
+        let setResult = AXUIElementSetAttributeValue(
+            element,
+            kAXSelectedTextAttribute as CFString,
+            replacementText as CFTypeRef
+        )
+        guard setResult == .success else {
+            return false
+        }
+
+        guard let beforeValue else {
+            return false
+        }
+
+        let expectedValue = (beforeValue as NSString).replacingCharacters(
+            in: NSRange(location: selectedRange.location, length: selectedRange.length),
+            with: replacementText
+        )
+
+        guard let afterValue = copyStringAttribute(element, attribute: kAXValueAttribute as CFString) else {
+            return false
+        }
+
+        if afterValue == expectedValue {
+            return true
+        }
+
+        return false
     }
 
     private func captureFromClipboardFallback(sourceApp: NSRunningApplication?) async throws -> TextTargetSession {
@@ -178,6 +287,9 @@ final class TextCapture {
             sourceApp: sourceApp,
             element: nil,
             selectedRange: nil,
+            prefixContext: "",
+            suffixContext: "",
+            applyStrategy: .clipboard,
             usedClipboardFallback: true
         )
     }
@@ -186,8 +298,9 @@ final class TextCapture {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
+        try await Task.sleep(for: .milliseconds(75))
         simulatePaste()
-        try await Task.sleep(for: .milliseconds(300))
+        try await Task.sleep(for: .milliseconds(750))
     }
 
     private func saveClipboard() {
@@ -250,6 +363,136 @@ final class TextCapture {
             return nil
         }
         return nsText.substring(with: nsRange)
+    }
+
+    private func resolvedSelectedRange(selectedText: String, preferredRange: CFRange, fullValue: String?, prefixContext: String = "", suffixContext: String = "") -> CFRange {
+        guard let fullValue else {
+            return preferredRange
+        }
+
+        if let preferredText = substring(fullValue, range: preferredRange), preferredText == selectedText {
+            return preferredRange
+        }
+
+        let nsFullValue = fullValue as NSString
+        let nsSelectedText = selectedText as NSString
+        var searchRange = NSRange(location: 0, length: nsFullValue.length)
+        var exactContextMatch: NSRange?
+        var bestRange: NSRange?
+        var bestDistance = Int.max
+
+        while true {
+            let foundRange = nsFullValue.range(of: nsSelectedText as String, options: [], range: searchRange)
+            if foundRange.location == NSNotFound {
+                break
+            }
+
+            let matchesContext = matchesContext(in: fullValue, range: foundRange, prefixContext: prefixContext, suffixContext: suffixContext)
+            if matchesContext {
+                exactContextMatch = foundRange
+                break
+            }
+
+            let distance = abs(foundRange.location - preferredRange.location)
+            if distance < bestDistance {
+                bestDistance = distance
+                bestRange = foundRange
+            }
+
+            let nextLocation = foundRange.location + max(foundRange.length, 1)
+            if nextLocation >= nsFullValue.length {
+                break
+            }
+            searchRange = NSRange(location: nextLocation, length: nsFullValue.length - nextLocation)
+        }
+
+        if let exactContextMatch {
+            return CFRange(location: exactContextMatch.location, length: exactContextMatch.length)
+        }
+
+        if let bestRange {
+            return CFRange(location: bestRange.location, length: bestRange.length)
+        }
+
+        return preferredRange
+    }
+
+    private func selectionContext(in text: String?, range: CFRange, contextLength: Int = 8) -> (prefix: String, suffix: String) {
+        guard let text else { return ("", "") }
+        let nsText = text as NSString
+        let prefixLength = min(contextLength, max(0, range.location))
+        let suffixStart = range.location + range.length
+        let suffixLength = min(contextLength, max(0, nsText.length - suffixStart))
+        let prefix = prefixLength > 0 ? nsText.substring(with: NSRange(location: range.location - prefixLength, length: prefixLength)) : ""
+        let suffix = suffixLength > 0 ? nsText.substring(with: NSRange(location: suffixStart, length: suffixLength)) : ""
+        return (prefix, suffix)
+    }
+
+    private func matchesContext(in text: String, range: NSRange, prefixContext: String, suffixContext: String) -> Bool {
+        let context = selectionContext(in: text, range: CFRange(location: range.location, length: range.length), contextLength: max(prefixContext.count, suffixContext.count, 8))
+        let prefixMatches = prefixContext.isEmpty || context.prefix.hasSuffix(prefixContext)
+        let suffixMatches = suffixContext.isEmpty || context.suffix.hasPrefix(suffixContext)
+        return prefixMatches && suffixMatches
+    }
+
+    private func normalizeLineEndings(in text: String, toMatch sample: String) -> String {
+        let normalized = text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+
+        if sample.contains("\r\n") {
+            return normalized.replacingOccurrences(of: "\n", with: "\r\n")
+        }
+        if sample.contains("\r") {
+            return normalized.replacingOccurrences(of: "\n", with: "\r")
+        }
+        return normalized
+    }
+
+    private func chooseApplyStrategy(sourceApp: NSRunningApplication?, selectedText: String, selectedRange: CFRange, fullValue: String?) -> ApplyStrategy {
+        guard let sourceApp else {
+            return .clipboard
+        }
+
+        if isLikelyElectronApp(sourceApp) || isLikelyCatalystApp(sourceApp) {
+            return .clipboard
+        }
+
+        guard let fullValue else {
+            return .clipboard
+        }
+
+        guard let rangeText = substring(fullValue, range: selectedRange), rangeText == selectedText else {
+            return .clipboard
+        }
+
+        return .accessibility
+    }
+
+    private func isLikelyElectronApp(_ app: NSRunningApplication) -> Bool {
+        guard let bundleURL = app.bundleURL else {
+            return false
+        }
+
+        let frameworksURL = bundleURL.appendingPathComponent("Contents/Frameworks")
+        let electronFramework = frameworksURL.appendingPathComponent("Electron Framework.framework").path
+        let chromiumFramework = frameworksURL.appendingPathComponent("Chromium Embedded Framework.framework").path
+        return FileManager.default.fileExists(atPath: electronFramework) || FileManager.default.fileExists(atPath: chromiumFramework)
+    }
+
+    private func isLikelyCatalystApp(_ app: NSRunningApplication) -> Bool {
+        guard let bundleURL = app.bundleURL,
+              let bundle = Bundle(url: bundleURL) else {
+            return false
+        }
+
+        if bundle.object(forInfoDictionaryKey: "LSRequiresIPhoneOS") as? Bool == true {
+            return true
+        }
+
+        let frameworksURL = bundleURL.appendingPathComponent("Contents/Frameworks")
+        let uikitMacHelper = frameworksURL.appendingPathComponent("UIKitMacHelper.framework").path
+        return FileManager.default.fileExists(atPath: uikitMacHelper)
     }
 
     private func simulateCopy() {

@@ -1,19 +1,18 @@
 import SwiftUI
 
 struct DiffEngine {
-    private enum WordStyle { case plain, deleted, added }
+    private enum TokenStyle { case plain, deleted, added }
 
-    /// Compute a word-level inline diff as an AttributedString.
-    /// Deletions are shown in red with strikethrough, additions in green background.
+    /// Compute an inline diff as an AttributedString while preserving the exact
+    /// whitespace layout, including line breaks.
     func computeDiff(original: String, corrected: String) -> AttributedString {
         if original == corrected {
             return AttributedString(original)
         }
 
-        let oldWords = tokenize(original)
-        let newWords = tokenize(corrected)
-
-        let diff = newWords.difference(from: oldWords)
+        let oldTokens = tokenize(original)
+        let newTokens = tokenize(corrected)
+        let diff = newTokens.difference(from: oldTokens)
 
         var removedOldIndices = Set<Int>()
         var insertedNewIndices = Set<Int>()
@@ -24,38 +23,34 @@ struct DiffEngine {
             }
         }
 
-        // Build ordered list of (word, style) by merging old/new around kept (LCS) words
-        let keptOld = (0..<oldWords.count).filter { !removedOldIndices.contains($0) }
-        let keptNew = (0..<newWords.count).filter { !insertedNewIndices.contains($0) }
+        let keptOld = (0..<oldTokens.count).filter { !removedOldIndices.contains($0) }
+        let keptNew = (0..<newTokens.count).filter { !insertedNewIndices.contains($0) }
 
-        var ops: [(String, WordStyle)] = []
+        var ops: [(String, TokenStyle)] = []
         var prevOld = -1
         var prevNew = -1
 
         for i in 0..<keptOld.count {
-            let oi = keptOld[i]
-            let ni = keptNew[i]
-            // Deletions from old before this kept word
-            for j in (prevOld + 1)..<oi { ops.append((oldWords[j], .deleted)) }
-            // Insertions from new before this kept word
-            for j in (prevNew + 1)..<ni { ops.append((newWords[j], .added)) }
-            // Unchanged word
-            ops.append((oldWords[oi], .plain))
-            prevOld = oi
-            prevNew = ni
+            let oldIndex = keptOld[i]
+            let newIndex = keptNew[i]
+
+            for j in (prevOld + 1)..<oldIndex { ops.append((oldTokens[j], .deleted)) }
+            for j in (prevNew + 1)..<newIndex { ops.append((newTokens[j], .added)) }
+            ops.append((oldTokens[oldIndex], .plain))
+
+            prevOld = oldIndex
+            prevNew = newIndex
         }
 
-        // Trailing deletions and insertions
-        for j in (prevOld + 1)..<oldWords.count { ops.append((oldWords[j], .deleted)) }
-        for j in (prevNew + 1)..<newWords.count { ops.append((newWords[j], .added)) }
+        for j in (prevOld + 1)..<oldTokens.count { ops.append((oldTokens[j], .deleted)) }
+        for j in (prevNew + 1)..<newTokens.count { ops.append((newTokens[j], .added)) }
 
-        // Build AttributedString
         var result = AttributedString()
-        for (idx, (word, style)) in ops.enumerated() {
-            if idx > 0 { result.append(AttributedString(" ")) }
-            var attr = AttributedString(word)
+        for (token, style) in ops {
+            var attr = AttributedString(token)
             switch style {
-            case .plain: break
+            case .plain:
+                break
             case .deleted:
                 attr.foregroundColor = .red
                 attr.strikethroughStyle = .single
@@ -67,8 +62,30 @@ struct DiffEngine {
         return result
     }
 
-    /// Split text into tokens on any whitespace, preserving non-empty words.
     private func tokenize(_ text: String) -> [String] {
-        text.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+        guard !text.isEmpty else { return [] }
+
+        var tokens: [String] = []
+        var current = ""
+        var currentIsWhitespace: Bool?
+
+        for character in text {
+            let isWhitespace = character.isWhitespace
+            if currentIsWhitespace == isWhitespace || currentIsWhitespace == nil {
+                current.append(character)
+                currentIsWhitespace = isWhitespace
+                continue
+            }
+
+            tokens.append(current)
+            current = String(character)
+            currentIsWhitespace = isWhitespace
+        }
+
+        if !current.isEmpty {
+            tokens.append(current)
+        }
+
+        return tokens
     }
 }

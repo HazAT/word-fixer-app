@@ -13,6 +13,7 @@ final class AppState {
     private var session: TextTargetSession?
     private var correctedText: String?
     private var isProcessing = false
+    private var isApplying = false
     private var currentInvocationTask: Task<Void, Never>?
 
     init(configManager: ConfigManager) {
@@ -45,7 +46,7 @@ final class AppState {
             let session: TextTargetSession
             do {
                 session = try await textCapture.capture()
-                DebugLog.write("capture success length=\(session.originalText.count) clipboardFallback=\(session.usedClipboardFallback)")
+                DebugLog.write("capture success length=\(session.originalText.count) clipboardFallback=\(session.usedClipboardFallback) applyStrategy=\(session.applyStrategy)")
                 self.session = session
             } catch {
                 DebugLog.write("capture failed error=\(error.localizedDescription)")
@@ -92,6 +93,11 @@ final class AppState {
     }
 
     func confirm() {
+        guard !isApplying else {
+            DebugLog.write("confirm ignored: already applying")
+            return
+        }
+
         DebugLog.write("confirm")
         guard let session, let correctedText else {
             DebugLog.write("confirm with missing session/text")
@@ -99,12 +105,14 @@ final class AppState {
             return
         }
 
+        isApplying = true
+
         Task { @MainActor in
             overlayPanel.hide()
 
-            if session.usedClipboardFallback, let sourceApp = session.sourceApp {
+            if session.applyStrategy == .clipboard, let sourceApp = session.sourceApp {
                 sourceApp.activate()
-                try? await Task.sleep(for: .milliseconds(200))
+                try? await Task.sleep(for: .milliseconds(300))
             }
 
             do {
@@ -142,5 +150,6 @@ final class AppState {
         session = nil
         correctedText = nil
         isProcessing = false
+        isApplying = false
     }
 }
