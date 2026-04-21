@@ -14,6 +14,8 @@ MACOS_DIR="$APP_DIR/Contents/MacOS"
 RESOURCES_DIR="$APP_DIR/Contents/Resources"
 ICON_SOURCE="$ROOT/Resources/AppIcon.icns"
 ICON_SCRIPT="$ROOT/scripts/build-icon.sh"
+HELPER_SOURCE_DIR="$ROOT/helper"
+HELPER_DEST_DIR="$RESOURCES_DIR/helper"
 
 mkdir -p "$DIST_DIR"
 
@@ -31,6 +33,12 @@ cp "$BINARY" "$MACOS_DIR/$EXECUTABLE_NAME"
 cp "$PLIST_SOURCE" "$PLIST_DEST"
 if [[ -f "$ICON_SOURCE" ]]; then
   cp "$ICON_SOURCE" "$RESOURCES_DIR/AppIcon.icns"
+fi
+if [[ -d "$HELPER_SOURCE_DIR" ]]; then
+  rm -rf "$HELPER_DEST_DIR"
+  mkdir -p "$HELPER_DEST_DIR"
+  cp "$HELPER_SOURCE_DIR"/*.mjs "$HELPER_DEST_DIR/"
+  chmod +x "$HELPER_DEST_DIR/word-fixer-helper.mjs"
 fi
 chmod +x "$MACOS_DIR/$EXECUTABLE_NAME"
 

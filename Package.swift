@@ -10,7 +10,9 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "WordFixer",
-            dependencies: ["HotKey"],
+            dependencies: [
+                "HotKey",
+            ],
             path: "Sources/WordFixer",
             resources: [.copy("../../Resources/Info.plist")]
         ),

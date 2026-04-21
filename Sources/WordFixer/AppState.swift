@@ -13,9 +13,17 @@ final class AppState {
     private var session: TextTargetSession?
     private var correctedText: String?
     private var isProcessing = false
+    private var currentInvocationTask: Task<Void, Never>?
 
     init(configManager: ConfigManager) {
         self.configManager = configManager
+        DebugLog.write("AppState.init piBinaryPath=\(configManager.config.piBinaryPath)")
+
+        Task {
+            DebugLog.write("AppState prewarm start")
+            await piInvoker.prewarm(config: configManager.config)
+            DebugLog.write("AppState prewarm finished")
+        }
 
         overlayPanel.onConfirm = { [weak self] in
             Task { @MainActor in self?.confirm() }
@@ -26,38 +34,67 @@ final class AppState {
     }
 
     func trigger() {
-        guard !isProcessing else { return }
+        guard !isProcessing else {
+            DebugLog.write("trigger ignored: already processing")
+            return
+        }
+        DebugLog.write("trigger start")
         isProcessing = true
 
-        Task { @MainActor in
+        currentInvocationTask = Task { @MainActor in
             let session: TextTargetSession
             do {
                 session = try await textCapture.capture()
+                DebugLog.write("capture success length=\(session.originalText.count) clipboardFallback=\(session.usedClipboardFallback)")
                 self.session = session
             } catch {
+                DebugLog.write("capture failed error=\(error.localizedDescription)")
+                currentInvocationTask = nil
+                isProcessing = false
                 overlayPanel.show(state: .error(error.localizedDescription))
                 self.session = nil
                 return
             }
 
+            if Task.isCancelled {
+                DebugLog.write("trigger cancelled before loading state")
+                currentInvocationTask = nil
+                isProcessing = false
+                return
+            }
+
+            DebugLog.write("overlay loading shown")
             overlayPanel.show(state: .loading)
 
             let correctedText: String
             do {
                 correctedText = try await piInvoker.invoke(text: session.originalText, config: configManager.config)
+                DebugLog.write("pi invoke success outputLength=\(correctedText.count)")
+            } catch is CancellationError {
+                DebugLog.write("pi invoke cancelled")
+                currentInvocationTask = nil
+                isProcessing = false
+                return
             } catch {
+                DebugLog.write("pi invoke failed error=\(error.localizedDescription)")
+                currentInvocationTask = nil
+                isProcessing = false
                 overlayPanel.show(state: .error(error.localizedDescription))
                 return
             }
 
+            currentInvocationTask = nil
             self.correctedText = correctedText
             let diff = diffEngine.computeDiff(original: session.originalText, corrected: correctedText)
+            DebugLog.write("overlay diff shown")
             overlayPanel.show(state: .diff(diff))
         }
     }
 
     func confirm() {
+        DebugLog.write("confirm")
         guard let session, let correctedText else {
+            DebugLog.write("confirm with missing session/text")
             reset()
             return
         }
@@ -73,8 +110,11 @@ final class AppState {
             do {
                 try await textCapture.apply(correctedText, to: session)
                 textCapture.finish(session: session)
+                DebugLog.write("apply success")
             } catch {
+                DebugLog.write("apply failed error=\(error.localizedDescription)")
                 textCapture.cancel(session: session)
+                reset()
                 overlayPanel.show(state: .error(error.localizedDescription))
                 return
             }
@@ -85,6 +125,9 @@ final class AppState {
     }
 
     func dismiss() {
+        DebugLog.write("dismiss")
+        currentInvocationTask?.cancel()
+        currentInvocationTask = nil
         overlayPanel.hide()
         if let session {
             textCapture.cancel(session: session)
@@ -94,6 +137,8 @@ final class AppState {
     }
 
     private func reset() {
+        DebugLog.write("reset")
+        currentInvocationTask = nil
         session = nil
         correctedText = nil
         isProcessing = false
