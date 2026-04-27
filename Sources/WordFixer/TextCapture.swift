@@ -433,11 +433,18 @@ final class TextCapture {
     private func selectionContext(in text: String?, range: CFRange, contextLength: Int = 8) -> (prefix: String, suffix: String) {
         guard let text else { return ("", "") }
         let nsText = text as NSString
-        let prefixLength = min(contextLength, max(0, range.location))
-        let suffixStart = range.location + range.length
-        let suffixLength = min(contextLength, max(0, nsText.length - suffixStart))
-        let prefix = prefixLength > 0 ? nsText.substring(with: NSRange(location: range.location - prefixLength, length: prefixLength)) : ""
-        let suffix = suffixLength > 0 ? nsText.substring(with: NSRange(location: suffixStart, length: suffixLength)) : ""
+        let textLength = nsText.length
+        // Clamp the range into [0, textLength]. AX can hand us a selectedRange
+        // that points outside `kAXValueAttribute` (e.g. selecting text inside a
+        // web page where focus lives in a different element), and an unclamped
+        // substring(with:) would raise NSRangeException and abort the process.
+        let location = max(0, min(range.location, textLength))
+        let length = max(0, min(range.length, textLength - location))
+        let selectionEnd = location + length
+        let prefixLength = min(contextLength, location)
+        let suffixLength = min(contextLength, textLength - selectionEnd)
+        let prefix = prefixLength > 0 ? nsText.substring(with: NSRange(location: location - prefixLength, length: prefixLength)) : ""
+        let suffix = suffixLength > 0 ? nsText.substring(with: NSRange(location: selectionEnd, length: suffixLength)) : ""
         return (prefix, suffix)
     }
 
