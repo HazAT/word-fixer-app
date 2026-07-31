@@ -1,6 +1,70 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+const lineBreakPattern = /\r\n|\r|\n/g;
+
+export function encodeLineBreaks(text) {
+  let nonce = 0;
+  while (text.includes(`⟦WF_BREAK_${nonce}_`)) {
+    nonce += 1;
+  }
+
+  const markerPrefix = `⟦WF_BREAK_${nonce}_`;
+  const lineBreaks = [];
+  const encodedText = text.replace(lineBreakPattern, (lineBreak) => {
+    const marker = `${markerPrefix}${lineBreaks.length}⟧`;
+    lineBreaks.push({ marker, lineBreak });
+    return marker;
+  });
+
+  return { encodedText, lineBreaks, markerPrefix };
+}
+
+export function restoreLineBreaks(text, transport) {
+  if (/[\r\n]/.test(text)) {
+    throw new Error('Pi changed the line-break structure by returning a literal line break.');
+  }
+
+  let searchOffset = 0;
+  for (const { marker } of transport.lineBreaks) {
+    const markerOffset = text.indexOf(marker, searchOffset);
+    if (markerOffset === -1) {
+      throw new Error('Pi changed the line-break structure by removing or reordering a line-break marker.');
+    }
+    if (text.indexOf(marker, markerOffset + marker.length) !== -1) {
+      throw new Error('Pi changed the line-break structure by duplicating a line-break marker.');
+    }
+    searchOffset = markerOffset + marker.length;
+  }
+
+  let restoredText = text;
+  for (const { marker, lineBreak } of transport.lineBreaks) {
+    restoredText = restoredText.replace(marker, lineBreak);
+  }
+
+  if (restoredText.includes(transport.markerPrefix)) {
+    throw new Error('Pi changed the line-break structure by adding an unknown line-break marker.');
+  }
+
+  return restoredText;
+}
+
+export function lineBreakProtocol(transport) {
+  const markerDescription = transport.lineBreaks.length === 0
+    ? 'This input contains no line-break markers.'
+    : `This input contains ${transport.lineBreaks.length} immutable line-break marker(s) shaped like ${transport.markerPrefix}N⟧.`;
+
+  return `
+Word Fixer line-break transport protocol (mandatory):
+- ${markerDescription}
+- Each marker represents one exact original line break.
+- Return every marker exactly once and in the same order.
+- Do not add, remove, reorder, alter, or correct marker text.
+- Do not emit literal carriage-return or line-feed characters.
+- Correct only the text surrounding the markers.
+`;
+}
+
 export function resolveConfigDir() {
   if (process.env.WORD_FIXER_CONFIG_DIR) {
     return process.env.WORD_FIXER_CONFIG_DIR;
@@ -83,6 +147,7 @@ export async function loadPiServices({ piDir, piBinaryPath, cwd, log }) {
 }
 
 export async function fixText({ services, text, cwd, log }) {
+  const transport = encodeLineBreaks(text);
   const { session, modelFallbackMessage } = await services.createAgentSession({
     cwd,
     agentDir: services.piDir,
@@ -90,7 +155,7 @@ export async function fixText({ services, text, cwd, log }) {
     authStorage: services.authStorage,
     modelRegistry: services.modelRegistry,
     settingsManager: services.settingsManager,
-    systemPrompt: services.systemPrompt,
+    systemPrompt: `${services.systemPrompt}\n${lineBreakProtocol(transport)}`,
     thinkingLevel: 'off',
     tools: [],
   });
@@ -117,12 +182,12 @@ export async function fixText({ services, text, cwd, log }) {
     if (modelFallbackMessage) {
       await log.log('model fallback', modelFallbackMessage);
     }
-    await session.prompt(text);
-    const result = (completedText || assistantText).trim();
-    if (!result) {
+    await session.prompt(transport.encodedText);
+    const rawResult = completedText || assistantText;
+    if (!rawResult.trim()) {
       throw new Error('Pi returned no corrected text.');
     }
-    return { text: result, cost };
+    return { text: restoreLineBreaks(rawResult, transport), cost };
   } finally {
     unsubscribe();
     session.dispose();

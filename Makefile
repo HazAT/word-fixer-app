@@ -1,7 +1,10 @@
-.PHONY: build run clean icon package install install-system reinstall open
+.PHONY: build test run clean icon package install install-system reinstall open
 
 build:
 	swift build
+
+test:
+	node --test helper/helper-lib.test.mjs
 
 run:
 	swift run

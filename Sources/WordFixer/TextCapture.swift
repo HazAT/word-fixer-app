@@ -148,7 +148,7 @@ final class TextCapture {
     }
 
     private func replaceViaAccessibility(_ correctedText: String, originalText: String, prefixContext: String, suffixContext: String, element: AXUIElement, selectedRange: CFRange) throws {
-        let replacementText = normalizeLineEndings(in: correctedText, toMatch: copyStringAttribute(element, attribute: kAXValueAttribute as CFString) ?? correctedText)
+        let replacementText = correctedText
 
         if try replaceSelectedTextAttribute(replacementText, originalText: originalText, element: element, selectedRange: selectedRange) {
             return
@@ -453,20 +453,6 @@ final class TextCapture {
         let prefixMatches = prefixContext.isEmpty || context.prefix.hasSuffix(prefixContext)
         let suffixMatches = suffixContext.isEmpty || context.suffix.hasPrefix(suffixContext)
         return prefixMatches && suffixMatches
-    }
-
-    private func normalizeLineEndings(in text: String, toMatch sample: String) -> String {
-        let normalized = text
-            .replacingOccurrences(of: "\r\n", with: "\n")
-            .replacingOccurrences(of: "\r", with: "\n")
-
-        if sample.contains("\r\n") {
-            return normalized.replacingOccurrences(of: "\n", with: "\r\n")
-        }
-        if sample.contains("\r") {
-            return normalized.replacingOccurrences(of: "\n", with: "\r")
-        }
-        return normalized
     }
 
     private func chooseApplyStrategy(sourceApp: NSRunningApplication?, selectedText: String, selectedRange: CFRange, fullValue: String?) -> ApplyStrategy {
