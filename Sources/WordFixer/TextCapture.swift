@@ -23,6 +23,7 @@ enum TextCaptureError: Error, LocalizedError {
     case noTextCaptured
     case unsupportedTextElement
     case replacementFailed
+    case selectionRestoreFailed
     case simulationFailed
 
     var errorDescription: String? {
@@ -35,6 +36,8 @@ enum TextCaptureError: Error, LocalizedError {
             return "The focused app doesn't expose selected text through Accessibility."
         case .replacementFailed:
             return "Failed to replace the selected text."
+        case .selectionRestoreFailed:
+            return "The original text selection could not be restored. Select the text again and retry."
         case .simulationFailed:
             return "Failed to simulate keyboard shortcut."
         }
@@ -45,6 +48,7 @@ final class TextCapture {
     private enum Timing {
         static let clipboardCopySetup: Duration = .milliseconds(100)
         static let clipboardPoll: Duration = .milliseconds(50)
+        static let selectionRestoreSettle: Duration = .milliseconds(100)
         static let clipboardWriteSetup: Duration = .milliseconds(75)
         static let clipboardApplySettle: Duration = .milliseconds(750)
     }
@@ -56,7 +60,18 @@ final class TextCapture {
 
         let sourceApp = NSWorkspace.shared.frontmostApplication
         if let session = captureFromAccessibility(sourceApp: sourceApp) {
-            return session
+            if session.applyStrategy == .accessibility {
+                return session
+            }
+
+            // AX selected text can omit structural separators in rich web
+            // editors (notably Slack), even though it still reports a valid
+            // selection and range. Clipboard capture is authoritative whenever
+            // AX cannot also provide a safe AX replacement path.
+            return try await captureFromClipboardFallback(
+                sourceApp: sourceApp,
+                accessibilityTarget: session
+            )
         }
 
         return try await captureFromClipboardFallback(sourceApp: sourceApp)
@@ -77,6 +92,7 @@ final class TextCapture {
                 selectedRange: selectedRange
             )
         case .clipboard:
+            try await restoreClipboardSelection(for: session)
             if savedClipboardItems == nil {
                 saveClipboard()
             }
@@ -245,26 +261,10 @@ final class TextCapture {
         return false
     }
 
-    private func captureFromClipboardFallback(sourceApp: NSRunningApplication?) async throws -> TextTargetSession {
+    private func captureFromClipboardFallback(sourceApp: NSRunningApplication?, accessibilityTarget: TextTargetSession? = nil) async throws -> TextTargetSession {
         saveClipboard()
 
-        try await Task.sleep(for: Timing.clipboardCopySetup)
-
-        let pasteboard = NSPasteboard.general
-        let initialChangeCount = pasteboard.changeCount
-        pasteboard.clearContents()
-        simulateCopy()
-
-        var capturedText: String?
-        for _ in 0..<20 {
-            try await Task.sleep(for: Timing.clipboardPoll)
-            if pasteboard.changeCount > initialChangeCount {
-                capturedText = pasteboard.string(forType: .string)
-                if let capturedText, !capturedText.isEmpty {
-                    break
-                }
-            }
-        }
+        let capturedText = try await copySelectedTextViaClipboard()
 
         guard let capturedText, !capturedText.isEmpty else {
             restoreClipboard()
@@ -274,10 +274,10 @@ final class TextCapture {
         return TextTargetSession(
             originalText: capturedText,
             sourceApp: sourceApp,
-            element: nil,
-            selectedRange: nil,
-            prefixContext: "",
-            suffixContext: "",
+            element: accessibilityTarget?.element,
+            selectedRange: accessibilityTarget?.selectedRange,
+            prefixContext: accessibilityTarget?.prefixContext ?? "",
+            suffixContext: accessibilityTarget?.suffixContext ?? "",
             applyStrategy: .clipboard,
             usedClipboardFallback: true
         )
@@ -287,9 +287,82 @@ final class TextCapture {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
+        DebugLog.write("clipboard paste prepared length=\(text.count)")
         try await Task.sleep(for: Timing.clipboardWriteSetup)
         simulatePaste()
         try await Task.sleep(for: Timing.clipboardApplySettle)
+    }
+
+    private func restoreClipboardSelection(for session: TextTargetSession) async throws {
+        guard let element = session.element, let selectedRange = session.selectedRange else {
+            DebugLog.write("clipboard selection restore unavailable: capture used clipboard fallback")
+            return
+        }
+
+        let focusResult = AXUIElementSetAttributeValue(
+            element,
+            kAXFocusedAttribute as CFString,
+            kCFBooleanTrue
+        )
+
+        var range = selectedRange
+        guard let rangeValue = AXValueCreate(.cfRange, &range) else {
+            throw TextCaptureError.selectionRestoreFailed
+        }
+        let rangeResult = AXUIElementSetAttributeValue(
+            element,
+            kAXSelectedTextRangeAttribute as CFString,
+            rangeValue
+        )
+        guard rangeResult == .success else {
+            DebugLog.write("clipboard selection range restore failed result=\(rangeResult.rawValue) focusResult=\(focusResult.rawValue)")
+            throw TextCaptureError.selectionRestoreFailed
+        }
+
+        try await Task.sleep(for: Timing.selectionRestoreSettle)
+
+        let isFocused = copyBoolAttribute(element, attribute: kAXFocusedAttribute as CFString)
+        let restoredText = copyStringAttribute(element, attribute: kAXSelectedTextAttribute as CFString)
+        guard isFocused != false else {
+            let restoredLength = restoredText?.count ?? -1
+            DebugLog.write("clipboard selection verification failed focused=\(String(describing: isFocused)) restoredLength=\(restoredLength) expectedLength=\(session.originalText.count) focusResult=\(focusResult.rawValue)")
+            throw TextCaptureError.selectionRestoreFailed
+        }
+
+        if restoredText == session.originalText {
+            DebugLog.write("clipboard selection restored through AX length=\(restoredText?.count ?? 0) focusResult=\(focusResult.rawValue)")
+            return
+        }
+
+        guard session.usedClipboardFallback,
+              let copiedText = try await copySelectedTextViaClipboard(),
+              copiedText == session.originalText else {
+            let restoredLength = restoredText?.count ?? -1
+            DebugLog.write("clipboard selection content verification failed axLength=\(restoredLength) expectedLength=\(session.originalText.count)")
+            throw TextCaptureError.selectionRestoreFailed
+        }
+
+        DebugLog.write("clipboard selection restored and verified by copy length=\(copiedText.count) focusResult=\(focusResult.rawValue)")
+    }
+
+    private func copySelectedTextViaClipboard() async throws -> String? {
+        try await Task.sleep(for: Timing.clipboardCopySetup)
+
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        let emptyChangeCount = pasteboard.changeCount
+        simulateCopy()
+
+        for _ in 0..<20 {
+            try await Task.sleep(for: Timing.clipboardPoll)
+            if pasteboard.changeCount > emptyChangeCount,
+               let copiedText = pasteboard.string(forType: .string),
+               !copiedText.isEmpty {
+                return copiedText
+            }
+        }
+
+        return nil
     }
 
     private func shouldRestoreClipboard(for session: TextTargetSession?) -> Bool {
@@ -354,6 +427,13 @@ final class TextCapture {
         let result = AXUIElementCopyAttributeValue(element, attribute, &value)
         guard result == .success else { return nil }
         return value as? String
+    }
+
+    private func copyBoolAttribute(_ element: AXUIElement, attribute: CFString) -> Bool? {
+        var value: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(element, attribute, &value)
+        guard result == .success, let value else { return nil }
+        return value as? Bool
     }
 
     private func copyRangeAttribute(_ element: AXUIElement, attribute: CFString) -> CFRange? {

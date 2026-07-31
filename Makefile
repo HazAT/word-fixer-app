@@ -4,6 +4,7 @@ build:
 	swift build
 
 test:
+	swift test
 	node --test helper/helper-lib.test.mjs
 
 run:

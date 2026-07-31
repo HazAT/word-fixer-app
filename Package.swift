@@ -16,5 +16,10 @@ let package = Package(
             path: "Sources/WordFixer",
             resources: [.copy("../../Resources/Info.plist")]
         ),
+        .testTarget(
+            name: "WordFixerTests",
+            dependencies: ["WordFixer"],
+            path: "Tests/WordFixerTests"
+        ),
     ]
 )

@@ -2,10 +2,36 @@ import SwiftUI
 
 struct DiffEngine {
     private enum TokenStyle { case plain, deleted, added }
+    private struct Line {
+        let content: String
+        let separator: String
+    }
 
     /// Compute an inline diff as an AttributedString while preserving the exact
     /// whitespace layout, including line breaks.
     func computeDiff(original: String, corrected: String) -> AttributedString {
+        if original == corrected {
+            return AttributedString(original)
+        }
+
+        let oldLines = splitLines(original)
+        let newLines = splitLines(corrected)
+        let hasMatchingLineStructure = oldLines.count == newLines.count
+            && zip(oldLines, newLines).allSatisfy { $0.separator == $1.separator }
+
+        guard hasMatchingLineStructure else {
+            return computeInlineDiff(original: original, corrected: corrected)
+        }
+
+        var result = AttributedString()
+        for (oldLine, newLine) in zip(oldLines, newLines) {
+            result.append(computeInlineDiff(original: oldLine.content, corrected: newLine.content))
+            result.append(AttributedString(newLine.separator))
+        }
+        return result
+    }
+
+    private func computeInlineDiff(original: String, corrected: String) -> AttributedString {
         if original == corrected {
             return AttributedString(original)
         }
@@ -60,6 +86,36 @@ struct DiffEngine {
             result.append(attr)
         }
         return result
+    }
+
+    private func splitLines(_ text: String) -> [Line] {
+        let nsText = text as NSString
+        var lines: [Line] = []
+        var lineStart = 0
+        var index = 0
+
+        while index < nsText.length {
+            let character = nsText.character(at: index)
+            guard character == 13 || character == 10 else {
+                index += 1
+                continue
+            }
+
+            let separatorLength = character == 13
+                && index + 1 < nsText.length
+                && nsText.character(at: index + 1) == 10 ? 2 : 1
+            let content = nsText.substring(with: NSRange(location: lineStart, length: index - lineStart))
+            let separator = nsText.substring(with: NSRange(location: index, length: separatorLength))
+            lines.append(Line(content: content, separator: separator))
+            index += separatorLength
+            lineStart = index
+        }
+
+        lines.append(Line(
+            content: nsText.substring(with: NSRange(location: lineStart, length: nsText.length - lineStart)),
+            separator: ""
+        ))
+        return lines
     }
 
     private func tokenize(_ text: String) -> [String] {
