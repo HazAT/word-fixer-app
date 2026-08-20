@@ -3,7 +3,8 @@ import path from 'node:path';
 
 export async function loadWordFixerConfig() {
   const home = process.env.HOME;
-  const configDir = path.join(home, '.config', 'word-fixer');
+  const configDir = process.env.WORD_FIXER_CONFIG_DIR
+    ?? path.join(home, '.config', 'word-fixer');
   const configPath = path.join(configDir, 'config.json');
   const raw = await fs.readFile(configPath, 'utf8');
   const config = JSON.parse(raw);

@@ -58,11 +58,14 @@ test('fixText preserves boundary, blank, LF, CRLF, and CR breaks', async () => {
     piDir: '/tmp/word-fixer-test',
     systemPrompt: 'Correct text only.',
     SessionManager: { inMemory: () => ({}) },
-    authStorage: {},
-    modelRegistry: {},
+    modelRuntime: {},
     settingsManager: {},
+    async createResourceLoader(systemPrompt) {
+      receivedSystemPrompt = systemPrompt;
+      return {};
+    },
     async createAgentSession(options) {
-      receivedSystemPrompt = options.systemPrompt;
+      assert.equal(options.noTools, 'all');
       return {
         modelFallbackMessage: undefined,
         session: {

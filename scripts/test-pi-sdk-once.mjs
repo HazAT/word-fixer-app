@@ -1,72 +1,29 @@
 #!/usr/bin/env node
-import fs from 'node:fs/promises';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { loadWordFixerConfig, log, parseArgs, resolvePiSdkModuleUrl } from './pi-test-common.mjs';
+import {
+  fixText,
+  loadPiServices,
+  loadWordFixerConfig,
+} from '../helper/helper-lib.mjs';
 
-const { positional } = parseArgs(process.argv.slice(2));
-const prompt = positional[0] ?? 'helo wrld';
+const prompt = process.argv[2] ?? 'helo wrld';
+const config = await loadWordFixerConfig();
+const log = {
+  async log(message, extra = undefined) {
+    console.log(new Date().toISOString(), message, extra ?? '');
+  },
+};
 
-const { piBinaryPath, piDir } = await loadWordFixerConfig();
-const sdkUrl = await resolvePiSdkModuleUrl(piBinaryPath);
-const sdk = await import(sdkUrl.href);
+console.log(new Date().toISOString(), 'starting direct SDK test');
+console.log(new Date().toISOString(), 'piBinaryPath', config.piBinaryPath);
+console.log(new Date().toISOString(), 'piDir', config.piDir);
+console.log(new Date().toISOString(), 'prompt', JSON.stringify(prompt));
 
-const {
-  AuthStorage,
-  ModelRegistry,
-  SessionManager,
-  SettingsManager,
-  createAgentSession,
-} = sdk;
-
-const authPath = path.join(piDir, 'auth.json');
-const modelsPath = path.join(piDir, 'models.json');
-const settingsManager = SettingsManager.create(process.cwd(), piDir);
-const authStorage = AuthStorage.create(authPath);
-const modelRegistry = ModelRegistry.create(authStorage, modelsPath);
-const systemPrompt = await fs.readFile(path.join(piDir, 'SYSTEM.md'), 'utf8');
-
-log('starting direct SDK test');
-log('sdkUrl', sdkUrl.href);
-log('piDir', piDir);
-log('prompt', JSON.stringify(prompt));
-
-const { session, modelFallbackMessage } = await createAgentSession({
+const services = await loadPiServices({
+  piDir: config.piDir,
+  piBinaryPath: config.piBinaryPath,
   cwd: process.cwd(),
-  agentDir: piDir,
-  sessionManager: SessionManager.inMemory(),
-  authStorage,
-  modelRegistry,
-  settingsManager,
-  systemPrompt,
-  thinkingLevel: 'off',
-  tools: [],
+  log,
 });
-
-if (modelFallbackMessage) {
-  log('modelFallbackMessage', modelFallbackMessage);
-}
-
-let assistantText = '';
-const unsubscribe = session.subscribe((event) => {
-  if (event.type === 'message_update' && event.assistantMessageEvent?.type === 'text_delta') {
-    assistantText += event.assistantMessageEvent.delta;
-    log('delta', JSON.stringify(event.assistantMessageEvent.delta));
-  }
-  if (event.type === 'message_end' && event.message?.role === 'assistant') {
-    const text = (event.message.content ?? [])
-      .filter((item) => item.type === 'text')
-      .map((item) => item.text)
-      .join('');
-    log('message_end text', JSON.stringify(text));
-  }
-  if (event.type === 'turn_end') {
-    log('turn_end');
-  }
-});
-
-await session.prompt(prompt);
-log('assistantTextFromDeltas', JSON.stringify(assistantText));
-
-unsubscribe();
-session.dispose();
+const result = await fixText({ services, text: prompt, cwd: process.cwd(), log });
+console.log(new Date().toISOString(), 'result', JSON.stringify(result.text));
+console.log(new Date().toISOString(), 'cost', result.cost ?? null);

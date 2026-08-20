@@ -118,19 +118,19 @@ export async function loadPiServices({ piDir, piBinaryPath, cwd, log }) {
   const sdkUrl = await resolvePiSdkModuleUrl(piBinaryPath);
   const sdk = await import(sdkUrl.href);
   const {
-    AuthStorage,
-    ModelRegistry,
+    DefaultResourceLoader,
+    ModelRuntime,
     SessionManager,
     SettingsManager,
     createAgentSession,
+    getAgentDir,
   } = sdk;
 
-  const authPath = path.join(piDir, 'auth.json');
+  const authPath = path.join(getAgentDir(), 'auth.json');
   const modelsPath = path.join(piDir, 'models.json');
   const systemPromptPath = path.join(piDir, 'SYSTEM.md');
   const systemPrompt = await fs.readFile(systemPromptPath, 'utf8');
-  const authStorage = AuthStorage.create(authPath);
-  const modelRegistry = ModelRegistry.create(authStorage, modelsPath);
+  const modelRuntime = await ModelRuntime.create({ authPath, modelsPath });
   const settingsManager = SettingsManager.create(cwd, piDir);
 
   await log.log('services ready', { sdkUrl: sdkUrl.href, piDir, authPath, modelsPath, systemPromptPath });
@@ -140,28 +140,41 @@ export async function loadPiServices({ piDir, piBinaryPath, cwd, log }) {
     systemPrompt,
     SessionManager,
     createAgentSession,
-    authStorage,
-    modelRegistry,
+    modelRuntime,
     settingsManager,
+    async createResourceLoader(prompt) {
+      const resourceLoader = new DefaultResourceLoader({
+        cwd,
+        agentDir: piDir,
+        settingsManager,
+        systemPromptOverride: () => prompt,
+        appendSystemPromptOverride: () => [],
+      });
+      await resourceLoader.reload();
+      return resourceLoader;
+    },
   };
 }
 
 export async function fixText({ services, text, cwd, log }) {
   const transport = encodeLineBreaks(text);
+  const resourceLoader = await services.createResourceLoader(
+    `${services.systemPrompt}\n${lineBreakProtocol(transport)}`,
+  );
   const { session, modelFallbackMessage } = await services.createAgentSession({
     cwd,
     agentDir: services.piDir,
-    sessionManager: services.SessionManager.inMemory(),
-    authStorage: services.authStorage,
-    modelRegistry: services.modelRegistry,
+    sessionManager: services.SessionManager.inMemory(cwd),
+    modelRuntime: services.modelRuntime,
     settingsManager: services.settingsManager,
-    systemPrompt: `${services.systemPrompt}\n${lineBreakProtocol(transport)}`,
+    resourceLoader,
     thinkingLevel: 'off',
-    tools: [],
+    noTools: 'all',
   });
 
   let assistantText = '';
   let completedText = '';
+  let completionError;
   let cost;
   const unsubscribe = session.subscribe((event) => {
     if (event.type === 'message_update' && event.assistantMessageEvent?.type === 'text_delta') {
@@ -172,7 +185,9 @@ export async function fixText({ services, text, cwd, log }) {
         .filter((item) => item.type === 'text')
         .map((item) => item.text)
         .join('');
-      if (event.message.stopReason !== 'aborted' && event.message.stopReason !== 'error') {
+      if (event.message.stopReason === 'error' || event.message.stopReason === 'aborted') {
+        completionError = event.message.errorMessage ?? `Pi stopped with reason: ${event.message.stopReason}`;
+      } else {
         cost = event.message.usage?.cost?.total;
       }
     }
@@ -183,6 +198,9 @@ export async function fixText({ services, text, cwd, log }) {
       await log.log('model fallback', modelFallbackMessage);
     }
     await session.prompt(transport.encodedText);
+    if (completionError) {
+      throw new Error(completionError);
+    }
     const rawResult = completedText || assistantText;
     if (!rawResult.trim()) {
       throw new Error('Pi returned no corrected text.');
