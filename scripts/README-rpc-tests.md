@@ -6,7 +6,8 @@ These scripts are for isolating Pi transport behavior outside the macOS app.
 
 - Node available on PATH
 - `~/.config/word-fixer/config.json` configured
-- `~/.config/word-fixer/.pi/` contains `auth.json`, `settings.json`, `SYSTEM.md`
+- `~/.config/word-fixer/.pi/` contains `settings.json` and `SYSTEM.md`
+- Pi is authenticated through `~/.pi/agent/auth.json`
 
 ## Scripts
 
@@ -40,7 +41,7 @@ node scripts/test-pi-sdk-once.mjs "helo wrld"
 Uses direct Node bindings from the Pi SDK instead of the CLI RPC mode.
 This answers the question: **yes, we can use direct Node bindings**.
 
-The script resolves the SDK path from the configured `piBinaryPath`, so you do not need to install `@mariozechner/pi-coding-agent` in this project.
+The script resolves the SDK path from the configured `piBinaryPath`, so you do not need to install the Pi SDK package in this project.
 
 ### 4. Helper HTTP transport
 

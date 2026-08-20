@@ -129,7 +129,7 @@ Default config:
 }
 ```
 
-`make install` and `make install-system` now detect `pi` with `command -v pi` and write that resolved path into `~/.config/word-fixer/config.json` when bootstrapping the config. First launch also re-detects `pi` if the config still contains the old hardcoded path or points to a missing binary.
+`make install` and `make install-system` locate the current Pi SDK installation on `PATH` and refresh `piBinaryPath` in `~/.config/word-fixer/config.json`. This avoids retaining an older, still-executable Pi installation after an upgrade. First launch also re-detects `pi` if the configured path is missing.
 
 Config fields:
 
@@ -140,7 +140,7 @@ Config fields:
 
 ### `pi` environment
 
-Word Fixer uses its own `pi` directory:
+Word Fixer keeps its prompt and model settings in its own `pi` directory:
 
 ```text
 ~/.config/word-fixer/.pi/
@@ -150,7 +150,9 @@ Important files:
 
 - `~/.config/word-fixer/.pi/SYSTEM.md` — system prompt for correction behavior
 - `~/.config/word-fixer/.pi/settings.json` — provider/model settings
-- `~/.config/word-fixer/.pi/auth.json` — auth for the app's own `pi` environment
+- `~/.pi/agent/auth.json` — shared Pi authentication used by both the CLI and Word Fixer
+
+Using Pi's canonical auth file prevents two copied OAuth refresh tokens from invalidating each other.
 
 Example `settings.json` using Haiku:
 
@@ -251,6 +253,7 @@ Details:
 - The app is a Swift Package Manager executable, not an Xcode project
 - The Swift app depends only on [`HotKey`](https://github.com/soffes/HotKey)
 - The transport helper is plain Node `.mjs` code and uses the installed Pi SDK resolved from `piBinaryPath`
+- Authentication comes from Pi's canonical agent directory; Word Fixer's prompt, settings, and optional custom models remain app-specific
 - The app icon is generated from `Resources/logo.svg`
 
 Rebuild the icon manually:

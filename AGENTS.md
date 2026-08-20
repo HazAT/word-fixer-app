@@ -53,7 +53,7 @@ Important files:
 - `~/.config/word-fixer/config.json`
 - `~/.config/word-fixer/.pi/SYSTEM.md`
 - `~/.config/word-fixer/.pi/settings.json`
-- `~/.config/word-fixer/.pi/auth.json`
+- `~/.pi/agent/auth.json` — shared Pi authentication
 
 ## Key files
 - `Sources/WordFixer/WordFixerApp.swift` — app entry + hotkey

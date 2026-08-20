@@ -15,8 +15,7 @@ Inspect:
 - whether `~/.config/word-fixer/` exists
 - whether `~/.config/word-fixer/config.json` exists
 - whether `~/.config/word-fixer/.pi/SYSTEM.md` exists
-- whether `~/.config/word-fixer/.pi/auth.json` exists
-- whether global Pi auth exists at `~/.pi/auth.json`
+- whether global Pi auth exists at `~/.pi/agent/auth.json`
 - whether `~/Applications/Word Fixer.app` exists
 - whether `/Applications/Word Fixer.app` exists
 
@@ -33,8 +32,7 @@ Word Fixer onboarding status
 - Repo: present / missing
 - pi: found at ... / missing
 - Word Fixer config: present / missing
-- Word Fixer auth: present / missing
-- Global pi auth: present / missing
+- Global Pi auth: present / missing
 - Installed app: present at ... / not installed
 - Accessibility permission: requires manual confirmation in System Settings
 ```
@@ -51,12 +49,11 @@ Typical actions:
 |---|---|
 | `pi` missing | Tell the user Word Fixer depends on an installed Pi runtime and ask them to install/configure `pi` first |
 | Word Fixer config missing | Offer to run `make install`, `make install-system`, or launch the app once so config can be bootstrapped with the detected `pi` path |
-| Word Fixer auth missing but global `~/.pi/auth.json` exists | Offer to copy global auth into `~/.config/word-fixer/.pi/auth.json` |
 | App not installed | Offer to run `make install` or `make reinstall` |
 | Installed app path exists but user is testing from mixed locations | Recommend using the installed app path consistently |
 | Accessibility permission not confirmed | Explain the exact System Settings path and the app path that must be authorized |
 
-Do not perform file copies, config edits, or installation until the user agrees.
+Do not perform config edits or installation until the user agrees. Word Fixer reads Pi's canonical auth file directly; do not copy OAuth credentials into its app-specific config directory.
 
 ## Step 4: Execute approved actions
 
@@ -65,11 +62,8 @@ After the user approves, perform only the agreed actions.
 Allowed actions include:
 - run `swift build`, `make build`, `make install`, `make install-system`, or `make reinstall`
 - create `~/.config/word-fixer/.pi/` if needed
-- copy `~/.pi/auth.json` to `~/.config/word-fixer/.pi/auth.json` if the user approved it
 - show the current config file and explain fields
 - point the user to `~/.config/word-fixer/.pi/SYSTEM.md` for prompt customization
-
-When copying auth, preserve the source file and only copy if the destination is missing or the user explicitly approves overwriting it.
 
 ## Step 5: Guide macOS permission setup
 
@@ -93,7 +87,7 @@ Check:
 - the config directory exists
 - `config.json` exists and `piBinaryPath` points at the detected `pi` binary when install/bootstrap was part of the workflow
 - `~/.config/word-fixer/.pi/SYSTEM.md` exists
-- `~/.config/word-fixer/.pi/auth.json` exists when auth is required
+- `~/.pi/agent/auth.json` exists when auth is required
 
 Then give the user a final manual verification sequence:
 
