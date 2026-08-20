@@ -21,25 +21,40 @@ bootstrap_config() {
   user_home="$(resolve_user_home)"
   config_dir="$user_home/.config/word-fixer"
   config_file="$config_dir/config.json"
-
-  pi_path="$(command -v pi || true)"
-  if [[ -z "$pi_path" ]]; then
-    echo "Warning: pi not found on PATH; leaving $config_file unchanged" >&2
-    return
-  fi
-
-  case "$pi_path" in
-    /*) ;;
-    *) pi_path="$(cd "$(dirname "$pi_path")" && pwd)/$(basename "$pi_path")" ;;
-  esac
-
-  node_path="$(dirname "$pi_path")/node"
-  if [[ ! -x "$node_path" ]]; then
-    node_path="$(command -v node || true)"
-  fi
+  node_path="$(command -v node || true)"
 
   if [[ -z "$node_path" ]]; then
     echo "Warning: node not found; leaving $config_file unchanged" >&2
+    return
+  fi
+
+  pi_path="$($node_path - <<'EOF'
+const fs = require('fs');
+const path = require('path');
+const packageName = '@earendil-works/pi-coding-agent';
+for (const directory of (process.env.PATH ?? '').split(path.delimiter)) {
+  const candidate = path.join(directory, 'pi');
+  try {
+    const realPath = fs.realpathSync(candidate);
+    const packagePath = path.join(path.dirname(path.dirname(realPath)), 'package.json');
+    const packageJson = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+    if (packageJson.name === packageName) {
+      process.stdout.write(candidate);
+      break;
+    }
+  } catch {}
+}
+EOF
+)"
+
+  if [[ -z "$pi_path" ]]; then
+    echo "Warning: a Pi SDK installation was not found on PATH; leaving $config_file unchanged" >&2
+    return
+  fi
+
+  node_path="$(dirname "$pi_path")/node"
+  if [[ ! -x "$node_path" ]]; then
+    echo "Warning: node was not found next to $pi_path; leaving $config_file unchanged" >&2
     return
   fi
 
@@ -62,15 +77,11 @@ EOF
 const fs = require('fs');
 const [configFile, piPath] = process.argv.slice(2);
 const config = JSON.parse(fs.readFileSync(configFile, 'utf8'));
-const current = config.piBinaryPath ?? '';
-if (current && fs.existsSync(current)) {
-  process.exit(0);
-}
 config.piBinaryPath = piPath;
 fs.writeFileSync(configFile, `${JSON.stringify(config, null, 2)}\n`);
 EOF
 
-  echo "Ensured piBinaryPath in $config_file -> $pi_path"
+  echo "Updated piBinaryPath in $config_file -> $pi_path"
 }
 
 while [[ $# -gt 0 ]]; do
