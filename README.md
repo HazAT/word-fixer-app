@@ -2,6 +2,8 @@
 
 https://github.com/user-attachments/assets/49385317-fbf7-4dac-b86a-926a70f3a979
 
+![Word Fixer review overlay](docs/word-fixer-review.png)
+
 Word Fixer is a tiny macOS menu bar app that fixes selected text with `pi`.
 
 Select text in almost any app, press **⌘⇧C**, compare a light correction with a more idiomatic English version, and review a short naturalness note. Press **Tab** to choose which version to paste, **Enter** to apply it, or **Escape** to cancel.
