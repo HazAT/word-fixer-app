@@ -11,7 +11,10 @@ final class AppState {
     let overlayPanel = OverlayPanel()
 
     private var session: TextTargetSession?
-    private var correctedText: String?
+    private var corrections: [String] = []
+    private var correctionOptions: [CorrectionOption] = []
+    private var feedback: String?
+    private var selectedCorrectionIndex = 0
     private var invocationCost: Double?
     private var isProcessing = false
     private var isApplying = false
@@ -32,6 +35,9 @@ final class AppState {
         }
         overlayPanel.onDismiss = { [weak self] in
             Task { @MainActor in self?.dismiss() }
+        }
+        overlayPanel.onSwitchSelection = { [weak self] in
+            Task { @MainActor in self?.switchSelection() }
         }
     }
 
@@ -72,7 +78,7 @@ final class AppState {
             do {
                 invocation = try await piInvoker.invoke(text: session.originalText, config: configManager.config)
                 let costDescription = invocation.cost.map { String($0) } ?? "nil"
-                DebugLog.write("pi invoke success outputLength=\(invocation.text.count) cost=\(costDescription)")
+                DebugLog.write("pi invoke success correctionLength=\(invocation.correction.count) naturalLength=\(invocation.natural.count) feedbackLength=\(invocation.feedback.count) cost=\(costDescription)")
             } catch is CancellationError {
                 DebugLog.write("pi invoke cancelled")
                 currentInvocationTask = nil
@@ -87,11 +93,22 @@ final class AppState {
             }
 
             currentInvocationTask = nil
-            self.correctedText = invocation.text
-            self.invocationCost = invocation.cost
-            let diff = diffEngine.computeDiff(original: session.originalText, corrected: invocation.text)
-            DebugLog.write("overlay diff shown")
-            overlayPanel.show(state: .diff(diff, cost: invocation.cost))
+            corrections = [invocation.correction, invocation.natural]
+            correctionOptions = [
+                CorrectionOption(
+                    title: "Light edit",
+                    diff: diffEngine.computeDiff(original: session.originalText, corrected: invocation.correction)
+                ),
+                CorrectionOption(
+                    title: "Natural English",
+                    diff: diffEngine.computeDiff(original: session.originalText, corrected: invocation.natural)
+                ),
+            ]
+            feedback = invocation.feedback
+            selectedCorrectionIndex = 0
+            invocationCost = invocation.cost
+            DebugLog.write("overlay review shown")
+            showReview()
         }
     }
 
@@ -101,12 +118,13 @@ final class AppState {
             return
         }
 
-        DebugLog.write("confirm")
-        guard let session, let correctedText else {
+        DebugLog.write("confirm selectedCorrectionIndex=\(selectedCorrectionIndex)")
+        guard let session, corrections.indices.contains(selectedCorrectionIndex) else {
             DebugLog.write("confirm with missing session/text")
             reset()
             return
         }
+        let correctedText = corrections[selectedCorrectionIndex]
 
         isApplying = true
 
@@ -135,6 +153,13 @@ final class AppState {
         }
     }
 
+    func switchSelection() {
+        guard correctionOptions.count > 1 else { return }
+        selectedCorrectionIndex = (selectedCorrectionIndex + 1) % correctionOptions.count
+        DebugLog.write("switch selection index=\(selectedCorrectionIndex)")
+        showReview()
+    }
+
     func dismiss() {
         DebugLog.write("dismiss")
         currentInvocationTask?.cancel()
@@ -147,11 +172,24 @@ final class AppState {
         reset()
     }
 
+    private func showReview() {
+        guard let feedback else { return }
+        overlayPanel.show(state: .review(
+            options: correctionOptions,
+            selectedIndex: selectedCorrectionIndex,
+            feedback: feedback,
+            cost: invocationCost
+        ))
+    }
+
     private func reset() {
         DebugLog.write("reset")
         currentInvocationTask = nil
         session = nil
-        correctedText = nil
+        corrections = []
+        correctionOptions = []
+        feedback = nil
+        selectedCorrectionIndex = 0
         invocationCost = nil
         isProcessing = false
         isApplying = false

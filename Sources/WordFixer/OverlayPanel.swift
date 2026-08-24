@@ -4,12 +4,13 @@ import SwiftUI
 final class OverlayPanel: NSPanel {
     var onConfirm: (() -> Void)?
     var onDismiss: (() -> Void)?
+    var onSwitchSelection: (() -> Void)?
 
     private var hostingView: NSHostingView<OverlayView>?
 
     init() {
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 500, height: 200),
+            contentRect: NSRect(x: 0, y: 0, width: 580, height: 200),
             styleMask: [.nonactivatingPanel, .fullSizeContentView, .borderless],
             backing: .buffered,
             defer: false
@@ -35,6 +36,8 @@ final class OverlayPanel: NSPanel {
             onConfirm?()
         case 53: // Escape
             onDismiss?()
+        case 48: // Tab
+            onSwitchSelection?()
         default:
             super.keyDown(with: event)
         }
@@ -53,8 +56,9 @@ final class OverlayPanel: NSPanel {
 
         // Size to fit content
         hostingView?.layout()
-        let fittingSize = hostingView?.fittingSize ?? NSSize(width: 500, height: 200)
-        let panelSize = NSSize(width: 500, height: min(fittingSize.height, 400))
+        let fittingSize = hostingView?.fittingSize ?? NSSize(width: 580, height: 200)
+        let maximumHeight = min(NSScreen.main?.visibleFrame.height ?? 680, 680) - 40
+        let panelSize = NSSize(width: 580, height: min(fittingSize.height, maximumHeight))
 
         // Center on screen
         if let screen = NSScreen.main {

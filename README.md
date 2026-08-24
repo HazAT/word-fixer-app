@@ -4,7 +4,7 @@ https://github.com/user-attachments/assets/49385317-fbf7-4dac-b86a-926a70f3a979
 
 Word Fixer is a tiny macOS menu bar app that fixes selected text with `pi`.
 
-Select text in almost any app, press **⌘⇧C**, review an inline diff in a Spotlight-like overlay, then press **Enter** to apply the correction or **Escape** to cancel.
+Select text in almost any app, press **⌘⇧C**, compare a light correction with a more idiomatic English version, and review a short naturalness note. Press **Tab** to choose which version to paste, **Enter** to apply it, or **Escape** to cancel.
 
 ## What it does
 
@@ -12,8 +12,9 @@ Select text in almost any app, press **⌘⇧C**, review an inline diff in a Spo
 - Uses a global shortcut (**⌘⇧C** by default)
 - Captures selected text from the currently focused app
 - Sends that text to a local helper that uses the `pi` SDK
-- Shows the corrected result as an inline diff
-- Replaces the original selection on confirmation
+- Runs three focused Pi sessions in parallel: light correction, natural-English rewrite, and usage feedback
+- Shows both pasteable versions as inline diffs and keeps the feedback visible below them
+- Uses **Tab** to select a version and replaces the original selection on confirmation
 - Keeps all `pi` behavior configurable in the filesystem
 
 ## How it works
@@ -24,9 +25,9 @@ Primary path:
 1. Read the focused text element via macOS Accessibility APIs
 2. Capture its selected text and selected range
 3. Send the selected text to a local Node helper on loopback HTTP
-4. The helper creates a fresh in-memory `pi` SDK session for the request
-5. Show the diff overlay
-6. Write the corrected text back to the same element/range
+4. The helper creates three fresh in-memory `pi` SDK sessions in parallel
+5. Show both diff options plus concise usage feedback
+6. Write the selected version back to the same element/range
 
 Fallback path:
 - If the focused app does not expose usable text attributes through Accessibility, Word Fixer falls back to simulated copy/paste via the clipboard
@@ -101,8 +102,9 @@ make reinstall
 1. Select text in a supported app
 2. Press **⌘⇧C**
 3. Wait for the overlay to appear
-4. Review the highlighted changes
-5. Press **Enter** to apply or **Escape** to dismiss
+4. Review the light edit, natural-English version, and usage feedback
+5. Press **Tab** to switch the highlighted paste choice
+6. Press **Enter** to apply or **Escape** to dismiss
 
 ## Configuration
 
@@ -148,8 +150,10 @@ Word Fixer keeps its prompt and model settings in its own `pi` directory:
 
 Important files:
 
-- `~/.config/word-fixer/.pi/SYSTEM.md` — system prompt for correction behavior
-- `~/.config/word-fixer/.pi/settings.json` — provider/model settings
+- `~/.config/word-fixer/.pi/SYSTEM.md` — light-correction prompt
+- `~/.config/word-fixer/.pi/NATURAL.md` — idiomatic English rewrite prompt
+- `~/.config/word-fixer/.pi/FEEDBACK.md` — “Does this make sense?” feedback prompt
+- `~/.config/word-fixer/.pi/settings.json` — provider/model settings shared by all three sessions
 - `~/.pi/agent/auth.json` — shared Pi authentication used by both the CLI and Word Fixer
 
 Using Pi's canonical auth file prevents two copied OAuth refresh tokens from invalidating each other.
@@ -243,7 +247,7 @@ Details:
 
 - Swift owns capture/apply, overlay UI, helper supervision, and timeout/cancel UX
 - The helper owns Pi SDK initialization and prompting
-- Each fix request creates a fresh in-memory SDK session
+- Each review request creates three fresh in-memory SDK sessions and runs them concurrently
 - The helper writes its current port to:
   - `~/.config/word-fixer/helper.json`
 - The installed app bundle includes the helper runtime under app resources

@@ -4,7 +4,10 @@ actor PiHelperClient {
     struct HelperState: Decodable {
         let pid: Int32
         let port: Int
+        let apiVersion: Int?
     }
+
+    private let apiVersion = 2
 
     private let startupTimeout: Duration = .seconds(5)
     private let requestTimeout: Duration = .seconds(30)
@@ -20,17 +23,24 @@ actor PiHelperClient {
         }
     }
 
-    func fix(text: String, config: AppConfig) async throws -> PiInvocationResult {
+    func review(text: String, config: AppConfig) async throws -> PiInvocationResult {
         let state = try await ensureRunning(config: config)
-        let url = URL(string: "http://127.0.0.1:\(state.port)/fix")!
+        let url = URL(string: "http://127.0.0.1:\(state.port)/review")!
         let response = try await post(url: url, body: ["text": text], timeout: requestTimeout)
         guard response.ok else {
             throw PiError.executionFailed(response.error ?? "Unknown helper error")
         }
-        guard let output = response.text else {
-            throw PiError.executionFailed("Helper returned no corrected text.")
+        guard let correction = response.correction,
+              let natural = response.natural,
+              let feedback = response.feedback else {
+            throw PiError.executionFailed("Helper returned an incomplete review.")
         }
-        return PiInvocationResult(text: output, cost: response.cost)
+        return PiInvocationResult(
+            correction: correction,
+            natural: natural,
+            feedback: feedback,
+            cost: response.cost
+        )
     }
 
     func shutdown() async {
@@ -163,7 +173,7 @@ actor PiHelperClient {
         let url = URL(string: "http://127.0.0.1:\(state.port)/health")!
         do {
             let response = try await post(url: url, body: [:], timeout: .seconds(2))
-            return response.ok && response.ready == true
+            return response.ok && response.ready == true && response.apiVersion == apiVersion
         } catch {
             return false
         }
@@ -217,9 +227,12 @@ private struct HelperResponse: Decodable {
     let ok: Bool
     let ready: Bool?
     let pid: Int32?
-    let text: String?
+    let correction: String?
+    let natural: String?
+    let feedback: String?
     let cost: Double?
     let error: String?
+    let apiVersion: Int?
 }
 
 private extension Duration {

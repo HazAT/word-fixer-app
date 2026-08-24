@@ -5,6 +5,7 @@ import {
   fixText,
   lineBreakProtocol,
   restoreLineBreaks,
+  reviewText,
 } from './helper-lib.mjs';
 
 test('round-trips mixed line breaks and intentional blank lines exactly', () => {
@@ -56,7 +57,7 @@ test('fixText preserves boundary, blank, LF, CRLF, and CR breaks', async () => {
 
   const services = {
     piDir: '/tmp/word-fixer-test',
-    systemPrompt: 'Correct text only.',
+    prompts: { correction: 'Correct text only.' },
     SessionManager: { inMemory: () => ({}) },
     modelRuntime: {},
     settingsManager: {},
@@ -108,6 +109,83 @@ test('fixText preserves boundary, blank, LF, CRLF, and CR breaks', async () => {
   assert.equal(result.text, '\nThis first line.\r\n\r\nSecond line.\rLast error.\n');
   assert.equal(result.cost, 0.001);
   assert.equal(disposed, true);
+});
+
+test('reviewText runs correction, natural rewrite, and feedback concurrently', async () => {
+  const prompts = {
+    correction: 'LIGHT PROMPT',
+    natural: 'NATURAL PROMPT',
+    feedback: 'FEEDBACK PROMPT',
+  };
+  let activeSessions = 0;
+  let maximumActiveSessions = 0;
+  const receivedTasks = [];
+
+  const services = {
+    piDir: '/tmp/word-fixer-test',
+    prompts,
+    SessionManager: { inMemory: () => ({}) },
+    modelRuntime: {},
+    settingsManager: {},
+    async createResourceLoader(systemPrompt) {
+      return { systemPrompt };
+    },
+    async createAgentSession({ resourceLoader }) {
+      let subscribed;
+      return {
+        modelFallbackMessage: undefined,
+        session: {
+          subscribe(callback) {
+            subscribed = callback;
+            return () => {};
+          },
+          async prompt(prompt) {
+            activeSessions += 1;
+            maximumActiveSessions = Math.max(maximumActiveSessions, activeSessions);
+            await new Promise((resolve) => setTimeout(resolve, 10));
+
+            let output;
+            if (resourceLoader.systemPrompt.startsWith(prompts.correction)) {
+              receivedTasks.push('correction');
+              output = prompt.replace('can tip the scale', 'can tip the scales');
+            } else if (resourceLoader.systemPrompt.startsWith(prompts.natural)) {
+              receivedTasks.push('natural');
+              output = prompt.replace('Your vote can tip the scale', 'Your vote could tip the scales');
+            } else {
+              receivedTasks.push('feedback');
+              output = 'It makes sense, but “tip the scales” is the usual English idiom. “Tip the scale” sounds slightly off here.';
+            }
+
+            subscribed({
+              type: 'message_end',
+              message: {
+                role: 'assistant',
+                content: [{ type: 'text', text: output }],
+                stopReason: 'stop',
+                usage: { cost: { total: 0.001 } },
+              },
+            });
+            activeSessions -= 1;
+          },
+          dispose() {},
+        },
+      };
+    },
+  };
+
+  const result = await reviewText({
+    services,
+    text: 'Your vote can tip the scale',
+    cwd: '/tmp',
+    log: { async log() {} },
+  });
+
+  assert.equal(maximumActiveSessions, 3);
+  assert.deepEqual(receivedTasks.sort(), ['correction', 'feedback', 'natural']);
+  assert.equal(result.correction, 'Your vote can tip the scales');
+  assert.equal(result.natural, 'Your vote could tip the scales');
+  assert.match(result.feedback, /usual English idiom/);
+  assert.equal(result.cost, 0.003);
 });
 
 test('protocol explicitly forbids structural line-break changes', () => {

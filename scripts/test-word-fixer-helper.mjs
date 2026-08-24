@@ -43,7 +43,7 @@ if (!port) {
 
 const baseUrl = `http://127.0.0.1:${port}`;
 console.log('health', await fetchJson(`${baseUrl}/health`, {}));
-console.log('fix', await fetchJson(`${baseUrl}/fix`, { text: prompt }));
+console.log('review', await fetchJson(`${baseUrl}/review`, { text: prompt }));
 console.log('shutdown', await fetchJson(`${baseUrl}/shutdown`, {}));
 await once(child, 'exit');
 

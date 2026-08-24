@@ -4,13 +4,14 @@ import path from 'node:path';
 import process from 'node:process';
 import {
   createLogger,
-  fixText,
   loadPiServices,
   loadWordFixerConfig,
   removeFileIfPresent,
+  reviewText,
   writeJsonFile,
 } from './helper-lib.mjs';
 
+const apiVersion = 2;
 const idleTimeoutMs = Number(process.env.WORD_FIXER_HELPER_IDLE_MS ?? 120000);
 const cwd = process.env.WORD_FIXER_HELPER_CWD || process.cwd();
 
@@ -22,7 +23,7 @@ const logger = createLogger({
 });
 const helperStatePath = path.join(config.configDir, 'helper.json');
 
-let services = null;
+let servicesPromise = null;
 let server = null;
 let isShuttingDown = false;
 let idleTimer = null;
@@ -52,16 +53,15 @@ async function readJsonBody(request) {
 }
 
 async function ensureServices() {
-  if (services) {
-    return services;
+  if (!servicesPromise) {
+    servicesPromise = loadPiServices({
+      piDir: config.piDir,
+      piBinaryPath: config.piBinaryPath,
+      cwd,
+      log: logger,
+    });
   }
-  services = await loadPiServices({
-    piDir: config.piDir,
-    piBinaryPath: config.piBinaryPath,
-    cwd,
-    log: logger,
-  });
-  return services;
+  return servicesPromise;
 }
 
 async function shutdown(reason) {
@@ -91,7 +91,7 @@ async function handleRequest(request, response) {
 
   try {
     if (request.url === '/health') {
-      sendJson(response, 200, { ok: true, ready: true, pid: process.pid });
+      sendJson(response, 200, { ok: true, ready: true, pid: process.pid, apiVersion });
       return;
     }
 
@@ -103,7 +103,7 @@ async function handleRequest(request, response) {
       return;
     }
 
-    if (request.url !== '/fix') {
+    if (request.url !== '/review') {
       sendJson(response, 404, { ok: false, error: 'Not found' });
       return;
     }
@@ -117,14 +117,21 @@ async function handleRequest(request, response) {
     }
 
     const currentServices = await ensureServices();
-    const fixed = await fixText({
+    const review = await reviewText({
       services: currentServices,
       text,
       cwd,
       log: logger,
     });
-    await logger.log('fix complete', { durationMs: Date.now() - startedAt, inputLength: text.length, outputLength: fixed.text.length, cost: fixed.cost });
-    sendJson(response, 200, { ok: true, text: fixed.text, cost: fixed.cost });
+    await logger.log('review complete', {
+      durationMs: Date.now() - startedAt,
+      inputLength: text.length,
+      correctionLength: review.correction.length,
+      naturalLength: review.natural.length,
+      feedbackLength: review.feedback.length,
+      cost: review.cost,
+    });
+    sendJson(response, 200, { ok: true, ...review });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await logger.log('request failed', { url: request.url, error: message });
@@ -149,6 +156,7 @@ if (!address || typeof address === 'string') {
 await writeJsonFile(helperStatePath, {
   pid: process.pid,
   port: address.port,
+  apiVersion,
 });
 await logger.log('listening', { pid: process.pid, port: address.port, helperStatePath, idleTimeoutMs, cwd, piDir: config.piDir });
 resetIdleTimer();

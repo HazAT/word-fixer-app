@@ -128,16 +128,22 @@ export async function loadPiServices({ piDir, piBinaryPath, cwd, log }) {
 
   const authPath = path.join(getAgentDir(), 'auth.json');
   const modelsPath = path.join(piDir, 'models.json');
-  const systemPromptPath = path.join(piDir, 'SYSTEM.md');
-  const systemPrompt = await fs.readFile(systemPromptPath, 'utf8');
+  const promptPaths = {
+    correction: path.join(piDir, 'SYSTEM.md'),
+    natural: path.join(piDir, 'NATURAL.md'),
+    feedback: path.join(piDir, 'FEEDBACK.md'),
+  };
+  const prompts = Object.fromEntries(await Promise.all(
+    Object.entries(promptPaths).map(async ([name, promptPath]) => [name, await fs.readFile(promptPath, 'utf8')]),
+  ));
   const modelRuntime = await ModelRuntime.create({ authPath, modelsPath });
   const settingsManager = SettingsManager.create(cwd, piDir);
 
-  await log.log('services ready', { sdkUrl: sdkUrl.href, piDir, authPath, modelsPath, systemPromptPath });
+  await log.log('services ready', { sdkUrl: sdkUrl.href, piDir, authPath, modelsPath, promptPaths });
 
   return {
     piDir,
-    systemPrompt,
+    prompts,
     SessionManager,
     createAgentSession,
     modelRuntime,
@@ -156,10 +162,10 @@ export async function loadPiServices({ piDir, piBinaryPath, cwd, log }) {
   };
 }
 
-export async function fixText({ services, text, cwd, log }) {
-  const transport = encodeLineBreaks(text);
+async function runTextTask({ services, text, cwd, log, systemPrompt, preserveLineBreaks }) {
+  const transport = preserveLineBreaks ? encodeLineBreaks(text) : null;
   const resourceLoader = await services.createResourceLoader(
-    `${services.systemPrompt}\n${lineBreakProtocol(transport)}`,
+    transport ? `${systemPrompt}\n${lineBreakProtocol(transport)}` : systemPrompt,
   );
   const { session, modelFallbackMessage } = await services.createAgentSession({
     cwd,
@@ -197,19 +203,70 @@ export async function fixText({ services, text, cwd, log }) {
     if (modelFallbackMessage) {
       await log.log('model fallback', modelFallbackMessage);
     }
-    await session.prompt(transport.encodedText);
+    await session.prompt(transport?.encodedText ?? text);
     if (completionError) {
       throw new Error(completionError);
     }
     const rawResult = completedText || assistantText;
     if (!rawResult.trim()) {
-      throw new Error('Pi returned no corrected text.');
+      throw new Error('Pi returned no text.');
     }
-    return { text: restoreLineBreaks(rawResult, transport), cost };
+    return {
+      text: transport ? restoreLineBreaks(rawResult, transport) : rawResult.trim(),
+      cost,
+    };
   } finally {
     unsubscribe();
     session.dispose();
   }
+}
+
+export async function fixText({ services, text, cwd, log }) {
+  return runTextTask({
+    services,
+    text,
+    cwd,
+    log,
+    systemPrompt: services.prompts.correction,
+    preserveLineBreaks: true,
+  });
+}
+
+export async function reviewText({ services, text, cwd, log }) {
+  const [correction, natural, feedback] = await Promise.all([
+    runTextTask({
+      services,
+      text,
+      cwd,
+      log,
+      systemPrompt: services.prompts.correction,
+      preserveLineBreaks: true,
+    }),
+    runTextTask({
+      services,
+      text,
+      cwd,
+      log,
+      systemPrompt: services.prompts.natural,
+      preserveLineBreaks: true,
+    }),
+    runTextTask({
+      services,
+      text,
+      cwd,
+      log,
+      systemPrompt: services.prompts.feedback,
+      preserveLineBreaks: false,
+    }),
+  ]);
+
+  const costs = [correction.cost, natural.cost, feedback.cost].filter((cost) => cost !== undefined);
+  return {
+    correction: correction.text,
+    natural: natural.text,
+    feedback: feedback.text,
+    cost: costs.length > 0 ? costs.reduce((total, cost) => total + cost, 0) : undefined,
+  };
 }
 
 export async function writeJsonFile(filePath, value) {
