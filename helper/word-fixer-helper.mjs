@@ -11,7 +11,7 @@ import {
   writeJsonFile,
 } from './helper-lib.mjs';
 
-const apiVersion = 2;
+const apiVersion = 3;
 const idleTimeoutMs = Number(process.env.WORD_FIXER_HELPER_IDLE_MS ?? 120000);
 const cwd = process.env.WORD_FIXER_HELPER_CWD || process.cwd();
 

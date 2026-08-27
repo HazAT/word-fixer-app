@@ -1,12 +1,37 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import {
   encodeLineBreaks,
   fixText,
   lineBreakProtocol,
   restoreLineBreaks,
   reviewText,
+  resolvePiSdkModuleUrl,
 } from './helper-lib.mjs';
+
+test('finds the SDK entry point when the Pi binary is nested under dist/bundle', async (t) => {
+  const temporaryDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'word-fixer-pi-sdk-'));
+  t.after(() => fs.rm(temporaryDirectory, { recursive: true, force: true }));
+
+  const packageRoot = path.join(temporaryDirectory, 'pi-package');
+  const cliPath = path.join(packageRoot, 'dist', 'bundle', 'cli.js');
+  const sdkPath = path.join(packageRoot, 'dist', 'index.js');
+  const binaryPath = path.join(temporaryDirectory, 'bin', 'pi');
+  await fs.mkdir(path.dirname(cliPath), { recursive: true });
+  await fs.mkdir(path.dirname(binaryPath), { recursive: true });
+  await fs.writeFile(path.join(packageRoot, 'package.json'), JSON.stringify({ name: '@earendil-works/pi-coding-agent' }));
+  await fs.writeFile(cliPath, '');
+  await fs.writeFile(sdkPath, '');
+  await fs.symlink(cliPath, binaryPath);
+
+  const sdkUrl = await resolvePiSdkModuleUrl(binaryPath);
+
+  assert.equal(fileURLToPath(sdkUrl), await fs.realpath(sdkPath));
+});
 
 test('round-trips mixed line breaks and intentional blank lines exactly', () => {
   const original = '\r\nFirst line\n\nSecond line\rThird line\r\n';

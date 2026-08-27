@@ -7,7 +7,7 @@ actor PiHelperClient {
         let apiVersion: Int?
     }
 
-    private let apiVersion = 2
+    private let apiVersion = 3
 
     private let startupTimeout: Duration = .seconds(5)
     private let requestTimeout: Duration = .seconds(30)

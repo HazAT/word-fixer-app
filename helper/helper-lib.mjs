@@ -1,5 +1,8 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+const piPackageName = '@earendil-works/pi-coding-agent';
 
 const lineBreakPattern = /\r\n|\r|\n/g;
 
@@ -83,8 +86,26 @@ export async function loadWordFixerConfig() {
 
 export async function resolvePiSdkModuleUrl(piBinaryPath) {
   const realPiPath = await fs.realpath(piBinaryPath);
-  const packageRoot = path.dirname(path.dirname(realPiPath));
-  return new URL(`file://${path.join(packageRoot, 'dist', 'index.js')}`);
+  let directory = path.dirname(realPiPath);
+
+  while (true) {
+    try {
+      const packageJson = JSON.parse(await fs.readFile(path.join(directory, 'package.json'), 'utf8'));
+      if (packageJson.name === piPackageName) {
+        return pathToFileURL(path.join(directory, 'dist', 'index.js'));
+      }
+    } catch (error) {
+      if (error?.code !== 'ENOENT') {
+        throw error;
+      }
+    }
+
+    const parent = path.dirname(directory);
+    if (parent === directory) {
+      throw new Error(`Could not find the ${piPackageName} package containing ${realPiPath}`);
+    }
+    directory = parent;
+  }
 }
 
 export function createLogger({ debugEnabled, logFile }) {
