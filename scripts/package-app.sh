@@ -7,6 +7,7 @@ DIST_DIR="$ROOT/dist"
 APP_NAME="Word Fixer.app"
 APP_DIR="$DIST_DIR/$APP_NAME"
 EXECUTABLE_NAME="WordFixer"
+BUNDLE_IDENTIFIER="com.wordfixer.app"
 BINARY="$BUILD_DIR/$EXECUTABLE_NAME"
 PLIST_SOURCE="$ROOT/Resources/Info.plist"
 PLIST_DEST="$APP_DIR/Contents/Info.plist"
@@ -41,5 +42,15 @@ if [[ -d "$HELPER_SOURCE_DIR" ]]; then
   chmod +x "$HELPER_DEST_DIR/word-fixer-helper.mjs"
 fi
 chmod +x "$MACOS_DIR/$EXECUTABLE_NAME"
+
+# Give local builds a stable designated requirement so macOS Accessibility
+# permission survives when the executable changes between installations.
+codesign \
+  --force \
+  --deep \
+  --sign - \
+  --identifier "$BUNDLE_IDENTIFIER" \
+  --requirements "=designated => identifier \"$BUNDLE_IDENTIFIER\"" \
+  "$APP_DIR"
 
 echo "$APP_DIR"

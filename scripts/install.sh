@@ -35,12 +35,20 @@ const packageName = '@earendil-works/pi-coding-agent';
 for (const directory of (process.env.PATH ?? '').split(path.delimiter)) {
   const candidate = path.join(directory, 'pi');
   try {
+    fs.accessSync(path.join(directory, 'node'), fs.constants.X_OK);
     const realPath = fs.realpathSync(candidate);
-    const packagePath = path.join(path.dirname(path.dirname(realPath)), 'package.json');
-    const packageJson = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
-    if (packageJson.name === packageName) {
-      process.stdout.write(candidate);
-      break;
+    let packageDirectory = path.dirname(realPath);
+    while (true) {
+      try {
+        const packageJson = JSON.parse(fs.readFileSync(path.join(packageDirectory, 'package.json'), 'utf8'));
+        if (packageJson.name === packageName) {
+          process.stdout.write(candidate);
+          process.exit(0);
+        }
+      } catch {}
+      const parent = path.dirname(packageDirectory);
+      if (parent === packageDirectory) break;
+      packageDirectory = parent;
     }
   } catch {}
 }
@@ -104,6 +112,23 @@ done
 
 mkdir -p "$TARGET_DIR"
 TARGET_APP="$TARGET_DIR/$(basename "$APP_PATH")"
+TARGET_EXECUTABLE="$TARGET_APP/Contents/MacOS/WordFixer"
+
+running_pid="$(pgrep -f -x "$TARGET_EXECUTABLE" || true)"
+if [[ -n "$running_pid" ]]; then
+  kill "$running_pid"
+  for _ in {1..30}; do
+    if ! kill -0 "$running_pid" 2>/dev/null; then
+      break
+    fi
+    sleep 0.1
+  done
+  if kill -0 "$running_pid" 2>/dev/null; then
+    echo "Word Fixer is still running; quit it before installing." >&2
+    exit 1
+  fi
+fi
+
 rm -rf "$TARGET_APP"
 ditto "$APP_PATH" "$TARGET_APP"
 
