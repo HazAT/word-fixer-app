@@ -84,6 +84,7 @@ final class ConfigManager {
     Rules:
     - Be candid and specific about anything unclear, awkward, or non-idiomatic
     - Distinguish between wording that is understandable and wording a native speaker would naturally use
+    - Flag wording that is understandable but misses a usual fixed idiom or collocation; do not call it fully natural
     - Mention the most useful idiomatic alternative when something feels off
     - Do not rewrite the full text
     - Use plain language and no more than three short sentences
