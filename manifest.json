@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "hazat.word-fixer",
+  "name": "Word Fixer",
+  "version": "1.0.0",
+  "author": "HazAT",
+  "description": "Review two text corrections and a concise takeaway in a native Omarchy overlay",
+  "kinds": [
+    "overlay"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "overlay": "linux/omarchy/WordFixer.qml"
+  }
+}
