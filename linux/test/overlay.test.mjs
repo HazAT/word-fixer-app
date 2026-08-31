@@ -21,6 +21,15 @@ function payload(state, fields = {}) {
   };
 }
 
+function locator(fields = {}) {
+  return {
+    schemaVersion: 1,
+    requestId,
+    payloadFile: '/tmp/word-fixer-test/overlay.json',
+    ...fields,
+  };
+}
+
 function originalText(segments) {
   return segments.filter(({ kind }) => kind !== 'added').map(({ text }) => text).join('');
 }
@@ -29,7 +38,14 @@ function correctedText(segments) {
   return segments.filter(({ kind }) => kind !== 'deleted').map(({ text }) => text).join('');
 }
 
-test('accepts strict loading, review, and actionable error payloads', () => {
+test('accepts a strict file locator plus loading, review, and actionable error payloads', () => {
+  assert.deepEqual(Model.parseLocator(JSON.stringify(locator())), {
+    valid: true,
+    schemaVersion: 1,
+    requestId,
+    payloadFile: '/tmp/word-fixer-test/overlay.json',
+  });
+
   assert.deepEqual(Model.parsePayload(JSON.stringify(payload('loading'))), {
     valid: true,
     schemaVersion: 1,
@@ -63,7 +79,11 @@ test('accepts strict loading, review, and actionable error payloads', () => {
   });
 });
 
-test('rejects malformed overlay payloads instead of guessing', () => {
+test('rejects malformed overlay locators and payloads instead of guessing', () => {
+  assert.equal(Model.parseLocator('{bad json').valid, false);
+  assert.equal(Model.parseLocator({ ...locator(), schemaVersion: 2 }).valid, false);
+  assert.equal(Model.parseLocator({ ...locator(), payloadFile: 'relative.json' }).valid, false);
+  assert.equal(Model.parseLocator({ ...locator(), original: 'must stay in file' }).valid, false);
   assert.equal(Model.parsePayload('{bad json').valid, false);
   assert.equal(Model.parsePayload({ ...payload('loading'), schemaVersion: 2 }).valid, false);
   assert.equal(Model.parsePayload({ ...payload('loading'), requestId: '../../bad' }).valid, false);
@@ -151,7 +171,9 @@ test('manifest and QML declare one keep-loaded bounded native overlay', async ()
   assert.equal(manifest.schemaVersion, 1);
   assert.deepEqual(manifest.kinds, ['overlay']);
   assert.equal(manifest.keepLoaded, true);
-  assert.match(qml, /function open\(payloadJson\)/);
+  assert.match(qml, /function open\(locatorJson\)/);
+  assert.match(qml, /id: payloadReader/);
+  assert.match(qml, /payloadReader\.reload\(\)/);
   assert.match(qml, /function close\(\)/);
   assert.match(qml, /PanelWindow\s*\{/);
   assert.match(qml, /WlrKeyboardFocus\.Exclusive/);

@@ -1,0 +1,73 @@
+#!/usr/bin/env node
+import process from 'node:process';
+import { executeWordFixer, DEFAULT_COMPLETION_TIMEOUT_MS } from '../lib/orchestrator.mjs';
+import { acquireRequestRuntime, DuplicateInvocationError } from '../lib/runtime.mjs';
+import { LinuxSystem } from '../lib/system.mjs';
+
+function usage() {
+  return 'Usage: word-fixer --source-address 0xADDRESS --source-pid PID --source-terminal true|false';
+}
+
+function parseArguments(args) {
+  if (
+    args.length !== 6
+    || args[0] !== '--source-address'
+    || args[2] !== '--source-pid'
+    || args[4] !== '--source-terminal'
+  ) {
+    throw new Error(usage());
+  }
+  if (!/^0x[0-9a-f]+$/i.test(args[1])) throw new Error('Invalid Hyprland source address.');
+  if (!/^[1-9][0-9]*$/.test(args[3]) || !Number.isSafeInteger(Number(args[3]))) {
+    throw new Error('Invalid Hyprland source PID.');
+  }
+  if (args[5] !== 'true' && args[5] !== 'false') throw new Error('Invalid source terminal classification.');
+  return {
+    sourceAddress: args[1].toLowerCase(),
+    sourcePid: Number(args[3]),
+    sourceTerminal: args[5] === 'true',
+  };
+}
+
+function configuredTimeout() {
+  const raw = process.env.WORD_FIXER_COMPLETION_TIMEOUT_MS;
+  if (raw === undefined) return DEFAULT_COMPLETION_TIMEOUT_MS;
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 1_000 || value > DEFAULT_COMPLETION_TIMEOUT_MS) {
+    throw new Error('WORD_FIXER_COMPLETION_TIMEOUT_MS is invalid.');
+  }
+  return value;
+}
+
+const controller = new AbortController();
+for (const signalName of ['SIGINT', 'SIGTERM']) {
+  process.on(signalName, () => {
+    if (!controller.signal.aborted) {
+      controller.abort(new Error(`Word Fixer received ${signalName}.`));
+    }
+  });
+}
+
+const system = new LinuxSystem();
+try {
+  const source = parseArguments(process.argv.slice(2));
+  const result = await executeWordFixer({
+    ...source,
+    system,
+    signal: controller.signal,
+    completionTimeoutMs: configuredTimeout(),
+    acquireRuntime: () => acquireRequestRuntime(),
+  });
+  if (['source-lost', 'refocus-failed', 'target-mismatch'].includes(result.status)) {
+    process.exitCode = 2;
+  }
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (error instanceof DuplicateInvocationError) {
+    await system.notifyFailure(message);
+  } else if (!controller.signal.aborted) {
+    await system.notifyFailure(message);
+  }
+  process.stderr.write(`word-fixer: ${message}\n`);
+  process.exitCode = 1;
+}

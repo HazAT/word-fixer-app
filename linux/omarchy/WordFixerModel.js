@@ -38,6 +38,30 @@ function invalid(message) {
   return { valid: false, error: message }
 }
 
+function parseLocator(payloadJson) {
+  var value
+  try {
+    value = typeof payloadJson === "string" ? JSON.parse(payloadJson) : payloadJson
+  } catch (e) {
+    return invalid("The review locator was not valid JSON.")
+  }
+
+  if (!record(value)) return invalid("The review locator must be an object.")
+  if (!exactKeys(value, ["schemaVersion", "requestId", "payloadFile"], []))
+    return invalid("The review locator has missing or unsupported fields.")
+  if (value.schemaVersion !== SCHEMA_VERSION)
+    return invalid("The review locator uses an unsupported schema version.")
+  if (typeof value.requestId !== "string" || !REQUEST_ID_PATTERN.test(value.requestId))
+    return invalid("The review locator has an invalid request ID.")
+  if (!absolutePath(value.payloadFile)) return invalid("The review locator has an invalid payload path.")
+  return {
+    valid: true,
+    schemaVersion: SCHEMA_VERSION,
+    requestId: value.requestId,
+    payloadFile: value.payloadFile
+  }
+}
+
 function parsePayload(payloadJson) {
   var value
   try {
@@ -304,6 +328,7 @@ function formatCost(cost) {
 
 if (typeof module !== "undefined") {
   module.exports = {
+    parseLocator: parseLocator,
     parsePayload: parsePayload,
     createInlineDiff: createInlineDiff,
     escapeStyledText: escapeStyledText,

@@ -15,6 +15,7 @@ Item {
   property bool opened: false
   property bool finished: false
   property string requestId: ""
+  property string payloadFile: ""
   property string completionFile: ""
   property string viewState: "loading"
   property int selectedIndex: 0
@@ -66,6 +67,8 @@ Item {
   function finish(outcome, choice) {
     root.writeCompletion(outcome, choice)
     root.opened = false
+    root.payloadFile = ""
+    payloadReader.path = ""
   }
 
   function dismiss() {
@@ -110,22 +113,45 @@ Item {
     })
   }
 
-  function open(payloadJson) {
-    var payload = WordFixerModel.parsePayload(payloadJson)
-    if (!payload.valid) {
-      if (root.opened && !root.finished) root.writeCompletion("cancel", -1)
-      root.resetContent()
-      root.requestId = ""
-      root.completionFile = ""
-      root.finished = true
-      root.viewState = "error"
-      root.errorMessage = payload.error
-      root.errorAction = "Press Escape to dismiss, then try the shortcut again."
-      root.opened = true
-      Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+  function showInvalidPayload(message) {
+    if (root.opened && !root.finished) root.writeCompletion("cancel", -1)
+    root.resetContent()
+    root.completionFile = ""
+    root.finished = true
+    root.viewState = "error"
+    root.errorMessage = message
+    root.errorAction = "Press Escape to dismiss, then try the shortcut again."
+    root.opened = true
+    Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+  }
+
+  function loadPayload(contents) {
+    if (!root.payloadFile || payloadReader.path !== root.payloadFile) return
+    var payload = WordFixerModel.parsePayload(contents)
+    if (!payload.valid || payload.requestId !== root.requestId) {
+      root.showInvalidPayload(payload.valid
+        ? "The review payload does not match the active request."
+        : payload.error)
       return
     }
     root.applyPayload(payload)
+  }
+
+  function open(locatorJson) {
+    var locator = WordFixerModel.parseLocator(locatorJson)
+    if (!locator.valid) {
+      root.showInvalidPayload(locator.error)
+      root.requestId = ""
+      root.payloadFile = ""
+      payloadReader.path = ""
+      return
+    }
+    if (root.opened && !root.finished && root.requestId && root.requestId !== locator.requestId)
+      root.writeCompletion("cancel", -1)
+    root.requestId = locator.requestId
+    root.payloadFile = locator.payloadFile
+    payloadReader.path = locator.payloadFile
+    payloadReader.reload()
   }
 
   function close() {
@@ -146,6 +172,19 @@ Item {
     else if (action.action === "accept") root.acceptSelected()
     else if (action.action === "select") root.selectedIndex = WordFixerModel.nextChoice(root.selectedIndex, action.direction)
     event.accepted = action.action !== "none"
+  }
+
+  FileView {
+    id: payloadReader
+    path: ""
+    watchChanges: true
+    printErrors: true
+    onLoaded: root.loadPayload(text())
+    onFileChanged: reload()
+    onLoadFailed: function(error) {
+      if (root.opened)
+        root.showInvalidPayload("Could not read the review payload: " + error)
+    }
   }
 
   FileView {
