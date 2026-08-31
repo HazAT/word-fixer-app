@@ -1,0 +1,279 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+umask 077
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+PLUGIN_ID="hazat.word-fixer"
+PROVIDER="openai-codex"
+MODEL="gpt-5.4-mini"
+CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+BIN_HOME="${XDG_BIN_HOME:-$HOME/.local/bin}"
+CONFIG_DIR="$CONFIG_HOME/word-fixer"
+PI_DIR="$CONFIG_DIR/.pi"
+SUPPORT_BIN_DIR="$CONFIG_DIR/bin"
+CONFIG_FILE="$CONFIG_DIR/config.json"
+SETTINGS_FILE="$PI_DIR/settings.json"
+AUTH_FILE="$HOME/.pi/agent/auth.json"
+PLUGIN_LINK="$HOME/.config/omarchy/plugins/$PLUGIN_ID"
+CLIENT_LINK="$BIN_HOME/word-fixer"
+CHECK_ONLY=0
+PI_COMMAND=""
+NODE_COMMAND=""
+
+usage() {
+  echo "Usage: linux/install [--check]"
+}
+
+fail() {
+  echo "word-fixer-install: $*" >&2
+  exit 1
+}
+
+ok() {
+  printf '[ok] %s\n' "$*"
+}
+
+missing() {
+  printf '[missing] %s\n' "$*" >&2
+  return 1
+}
+
+while (( $# > 0 )); do
+  case "$1" in
+    --check)
+      CHECK_ONLY=1
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    *)
+      usage >&2
+      fail "unknown option: $1"
+      ;;
+  esac
+  shift
+done
+
+find_pi_package() {
+  local directory package_file
+  directory="$(dirname "$(readlink -f "$PI_COMMAND")")"
+  while [[ $directory != / ]]; do
+    package_file="$directory/package.json"
+    if [[ -f $package_file ]] && jq -e '.name == "@earendil-works/pi-coding-agent"' "$package_file" >/dev/null 2>&1; then
+      [[ -r $directory/dist/index.js ]] || fail "Pi at $PI_COMMAND does not include the SDK entry point dist/index.js. Install an SDK-capable @earendil-works/pi-coding-agent distribution; no model fallback will be used."
+      printf '%s\n' "$directory"
+      return
+    fi
+    directory="$(dirname "$directory")"
+  done
+  fail "Pi at $PI_COMMAND is not part of an @earendil-works/pi-coding-agent SDK installation."
+}
+
+preflight() {
+  local command_name node_major model_output auth_output package_dir
+  local required_commands=(node jq wl-copy wl-paste hyprctl notify-send omarchy omarchy-shell pi)
+
+  for command_name in "${required_commands[@]}"; do
+    command -v "$command_name" >/dev/null 2>&1 || fail "required command '$command_name' was not found on PATH."
+  done
+
+  NODE_COMMAND="$(command -v node)"
+  PI_COMMAND="$(command -v pi)"
+  [[ $NODE_COMMAND == /* && -x $NODE_COMMAND ]] || fail "node must resolve to an absolute executable path."
+  [[ $PI_COMMAND == /* && -x $PI_COMMAND ]] || fail "pi must resolve to an absolute executable path."
+
+  node_major="$($NODE_COMMAND -p 'Number(process.versions.node.split(".")[0])')"
+  [[ $node_major =~ ^[0-9]+$ && $node_major -ge 22 ]] || fail "Node.js 22 or newer is required (found $($NODE_COMMAND --version))."
+
+  package_dir="$(find_pi_package)"
+  [[ -r $AUTH_FILE ]] || fail "canonical Pi authentication is missing at $AUTH_FILE. Sign in with pi; credentials are never copied into Word Fixer config."
+
+  model_output="$($PI_COMMAND --list-models "$PROVIDER/$MODEL")" || fail "could not query the required Pi model $PROVIDER/$MODEL."
+  awk -v provider="$PROVIDER" -v model="$MODEL" 'NR > 1 && $1 == provider && $2 == model { found = 1 } END { exit !found }' <<<"$model_output" \
+    || fail "required model $PROVIDER/$MODEL is unavailable; no fallback model will be used."
+
+  auth_output="$($PI_COMMAND auth check --provider "$PROVIDER" --model "$MODEL" --json --no-refresh)" \
+    || fail "canonical authentication for $PROVIDER/$MODEL is not ready."
+  jq -e --arg provider "$PROVIDER" '.status == "ready" and .provider == $provider and (.authType | type == "string")' \
+    <<<"$auth_output" >/dev/null \
+    || fail "canonical authentication for $PROVIDER/$MODEL is not ready."
+
+  omarchy plugin validate "$ROOT" >/dev/null \
+    || fail "the repository is not a valid Omarchy plugin."
+  [[ $(omarchy-shell shell ping) == "ok" ]] \
+    || fail "the running Omarchy shell did not answer its supported ping command."
+
+  case ":$PATH:" in
+    *":$BIN_HOME:"*) ;;
+    *) fail "$BIN_HOME is not on PATH; the installed word-fixer client would not be discoverable." ;;
+  esac
+
+  ok "prerequisites: Node $($NODE_COMMAND --version), Pi SDK $package_dir"
+  ok "required model: $PROVIDER/$MODEL"
+  ok "canonical auth: $AUTH_FILE"
+  ok "Omarchy manifest and running shell"
+}
+
+link_matches() {
+  local link_path="$1" expected_path="$2"
+  [[ -L $link_path ]] || return 1
+  [[ $(readlink -f "$link_path") == "$(readlink -f "$expected_path")" ]]
+}
+
+ensure_link() {
+  local source_path="$1" target_path="$2" label="$3"
+  if [[ -L $target_path ]]; then
+    link_matches "$target_path" "$source_path" \
+      || fail "$label already points somewhere else: $target_path"
+    return
+  fi
+  [[ ! -e $target_path ]] || fail "$label already exists and is not the expected link: $target_path"
+  ln -s "$source_path" "$target_path"
+}
+
+seed_file() {
+  local source_path="$1" target_path="$2"
+  if [[ ! -e $target_path ]]; then
+    cp "$source_path" "$target_path"
+    chmod 600 "$target_path"
+  fi
+}
+
+write_config() {
+  local temporary_file
+  temporary_file="$(mktemp "$CONFIG_DIR/.config.json.XXXXXX")"
+  if [[ -e $CONFIG_FILE ]]; then
+    jq -e 'type == "object"' "$CONFIG_FILE" >/dev/null \
+      || fail "$CONFIG_FILE must contain a JSON object."
+    jq --arg pi "$SUPPORT_BIN_DIR/pi" '. + {piBinaryPath: $pi}' "$CONFIG_FILE" >"$temporary_file"
+  else
+    jq -n --arg pi "$SUPPORT_BIN_DIR/pi" '{piBinaryPath: $pi, debugLogging: false}' >"$temporary_file"
+  fi
+  chmod 600 "$temporary_file"
+  mv "$temporary_file" "$CONFIG_FILE"
+}
+
+seed_settings() {
+  local temporary_file
+  if [[ -e $SETTINGS_FILE ]]; then
+    return 0
+  fi
+  temporary_file="$(mktemp "$PI_DIR/.settings.json.XXXXXX")"
+  jq -n \
+    --arg provider "$PROVIDER" \
+    --arg model "$MODEL" \
+    --arg key "$PROVIDER/$MODEL" \
+    '{defaultProvider: $provider, defaultModel: $model, defaultThinkingLevel: "off", modelThinkingLevels: {($key): "off"}}' \
+    >"$temporary_file"
+  chmod 600 "$temporary_file"
+  mv "$temporary_file" "$SETTINGS_FILE"
+}
+
+plugin_record() {
+  omarchy plugin list --json | jq -c --arg id "$PLUGIN_ID" 'map(select(.id == $id))[0] // empty'
+}
+
+install_plugin() {
+  local record=""
+  ensure_link "$ROOT" "$PLUGIN_LINK" "Omarchy plugin"
+  omarchy-shell shell rescanPlugins >/dev/null
+
+  for _ in {1..40}; do
+    record="$(plugin_record)"
+    [[ -n $record ]] && break
+    sleep 0.05
+  done
+  [[ -n $record ]] || fail "Omarchy did not discover plugin $PLUGIN_ID after rescan."
+
+  if ! jq -e '.enabled == true' <<<"$record" >/dev/null; then
+    omarchy plugin enable "$PLUGIN_ID" >/dev/null
+  fi
+}
+
+check_installation() {
+  local failures=0 record config_pi
+
+  if [[ -r $CONFIG_FILE ]] && config_pi="$(jq -er '.piBinaryPath | select(type == "string")' "$CONFIG_FILE" 2>/dev/null)" \
+      && [[ $config_pi == "$SUPPORT_BIN_DIR/pi" ]]; then
+    ok "app config: $CONFIG_FILE"
+  else
+    missing "app config with dedicated Pi path: $CONFIG_FILE" || failures=$((failures + 1))
+  fi
+
+  if link_matches "$SUPPORT_BIN_DIR/pi" "$PI_COMMAND" && link_matches "$SUPPORT_BIN_DIR/node" "$NODE_COMMAND"; then
+    ok "Pi and Node support links: $SUPPORT_BIN_DIR"
+  else
+    missing "Pi and Node support links: $SUPPORT_BIN_DIR" || failures=$((failures + 1))
+  fi
+
+  if [[ -r $SETTINGS_FILE ]] && jq -e \
+      --arg provider "$PROVIDER" --arg model "$MODEL" --arg key "$PROVIDER/$MODEL" \
+      '.defaultProvider == $provider and .defaultModel == $model and .defaultThinkingLevel == "off" and .modelThinkingLevels[$key] == "off"' \
+      "$SETTINGS_FILE" >/dev/null 2>&1; then
+    ok "dedicated model settings: $PROVIDER/$MODEL, thinking off"
+  else
+    missing "dedicated settings at $SETTINGS_FILE (no fallback model is accepted)" || failures=$((failures + 1))
+  fi
+
+  local prompt_name
+  for prompt_name in SYSTEM NATURAL FEEDBACK; do
+    if [[ -s $PI_DIR/$prompt_name.md ]]; then
+      ok "prompt: $PI_DIR/$prompt_name.md"
+    else
+      missing "prompt: $PI_DIR/$prompt_name.md" || failures=$((failures + 1))
+    fi
+  done
+
+  if link_matches "$PLUGIN_LINK" "$ROOT"; then
+    ok "plugin source link: $PLUGIN_LINK -> $ROOT"
+  else
+    missing "plugin source link: $PLUGIN_LINK -> $ROOT" || failures=$((failures + 1))
+  fi
+
+  record="$(plugin_record)"
+  if [[ -n $record ]] && jq -e '.enabled == true and (.kinds | index("overlay") != null)' <<<"$record" >/dev/null; then
+    ok "summonable plugin enablement: $PLUGIN_ID (enabled overlay)"
+  else
+    missing "enabled Omarchy overlay plugin: $PLUGIN_ID" || failures=$((failures + 1))
+  fi
+
+  if link_matches "$CLIENT_LINK" "$ROOT/linux/bin/word-fixer" \
+      && [[ $(command -v word-fixer 2>/dev/null || true) == "$CLIENT_LINK" ]]; then
+    ok "discoverable client: $CLIENT_LINK"
+  else
+    missing "discoverable client link: $CLIENT_LINK" || failures=$((failures + 1))
+  fi
+
+  if [[ -e $PI_DIR/auth.json || -L $PI_DIR/auth.json ]]; then
+    missing "app-local credentials must not exist: $PI_DIR/auth.json" || failures=$((failures + 1))
+  else
+    ok "auth remains canonical only: $AUTH_FILE"
+  fi
+
+  (( failures == 0 )) || fail "$failures installation check(s) failed."
+  echo "Word Fixer installation check passed."
+}
+
+preflight
+
+if (( CHECK_ONLY )); then
+  check_installation
+  exit 0
+fi
+
+mkdir -p "$CONFIG_DIR" "$PI_DIR" "$SUPPORT_BIN_DIR" "$(dirname "$PLUGIN_LINK")" "$BIN_HOME"
+chmod 700 "$CONFIG_DIR" "$PI_DIR" "$SUPPORT_BIN_DIR"
+
+ensure_link "$PI_COMMAND" "$SUPPORT_BIN_DIR/pi" "Pi support executable"
+ensure_link "$NODE_COMMAND" "$SUPPORT_BIN_DIR/node" "Node support executable"
+seed_file "$ROOT/shared/prompts/SYSTEM.md" "$PI_DIR/SYSTEM.md"
+seed_file "$ROOT/shared/prompts/NATURAL.md" "$PI_DIR/NATURAL.md"
+seed_file "$ROOT/shared/prompts/FEEDBACK.md" "$PI_DIR/FEEDBACK.md"
+seed_settings
+write_config
+ensure_link "$ROOT/linux/bin/word-fixer" "$CLIENT_LINK" "Word Fixer client"
+install_plugin
+
+check_installation
