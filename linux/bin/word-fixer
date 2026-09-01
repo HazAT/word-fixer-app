@@ -40,12 +40,15 @@ function configuredTimeout() {
 }
 
 const controller = new AbortController();
+const signalHandlers = new Map();
 for (const signalName of ['SIGINT', 'SIGTERM']) {
-  process.on(signalName, () => {
+  const handler = () => {
     if (!controller.signal.aborted) {
       controller.abort(new Error(`Word Fixer received ${signalName}.`));
     }
-  });
+  };
+  signalHandlers.set(signalName, handler);
+  process.on(signalName, handler);
 }
 
 const system = new LinuxSystem();
@@ -70,4 +73,8 @@ try {
   }
   process.stderr.write(`word-fixer: ${message}\n`);
   process.exitCode = 1;
+} finally {
+  for (const [signalName, handler] of signalHandlers) {
+    process.off(signalName, handler);
+  }
 }

@@ -5,6 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { once } from 'node:events';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { executeWordFixer } from '../lib/orchestrator.mjs';
 import { selectClipboardCommand } from '../lib/input-command.mjs';
 import {
@@ -31,6 +33,7 @@ const terminalWindow = {
   initialClass: 'com.mitchellh.ghostty',
   tags: ['terminal*'],
 };
+const execFileAsync = promisify(execFile);
 
 async function temporaryRuntime(t) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'word-fixer-client-test-'));
@@ -145,6 +148,26 @@ async function execute(t, system, options = {}) {
   if (failure) throw failure;
   return result;
 }
+
+test('client removes signal watchers and exits after a handled error', async (t) => {
+  const directory = await temporaryRuntime(t);
+  const notifySend = path.join(directory, 'notify-send');
+  await fs.writeFile(notifySend, '#!/bin/sh\nexit 0\n', { mode: 0o700 });
+
+  let failure;
+  try {
+    await execFileAsync(process.execPath, [path.resolve('linux/bin/word-fixer')], {
+      env: { ...process.env, PATH: directory },
+      timeout: 2_000,
+    });
+  } catch (error) {
+    failure = error;
+  }
+
+  assert.equal(failure?.code, 1);
+  assert.equal(failure?.signal, null);
+  assert.match(failure?.stderr ?? '', /Usage: word-fixer/);
+});
 
 test('stub helper runs loading and review through light-edit acceptance', async (t) => {
   const system = new StubSystem({ completion: { state: 'review', outcome: 'choice', choice: 0 } });
