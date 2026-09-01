@@ -85,7 +85,7 @@ Linux install/bootstrap seeds only missing prompts and settings. Never overwrite
 
 ### Omarchy/Linux
 
-- `manifest.json` — schema-v1 `hazat.word-fixer` overlay plugin.
+- `manifest.json` — schema-v1 `hazat.word-fixer` overlay and bar-widget plugin.
 - `linux/install` — idempotent install and non-destructive `--check`.
 - `linux/bin/word-fixer` — single-instance client entry point.
 - `linux/hypr/word-fixer.lua` — source capture and deferred external-client launch only; no clipboard or input injection.
@@ -94,6 +94,7 @@ Linux install/bootstrap seeds only missing prompts and settings. Never overwrite
 - `linux/lib/runtime.mjs` — restrictive request IPC, lock, timeout, and cleanup.
 - `linux/lib/protocol.mjs`, `diff.mjs`, `target.mjs`, `input-command.mjs` — validated platform primitives.
 - `linux/omarchy/WordFixer.qml`, `WordFixerModel.js` — themed overlay, controls, escaped diff rendering.
+- `Status.qml` — persistent ready indicator and active-review status in the Omarchy bar.
 - `linux/test/` — Linux unit, overlay, orchestration, and installer tests.
 
 ## Verification

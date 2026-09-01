@@ -122,13 +122,21 @@ The installation is idempotent. It:
 - validates the model, canonical auth, manifest, and running shell;
 - installs the locked `@earendil-works/pi-coding-agent@0.84.4` SDK under `~/.local/share/word-fixer/sdk/` (or `$XDG_DATA_HOME/word-fixer/sdk/`);
 - records a dedicated Node executable link in app support state;
-- links the repository as the `hazat.word-fixer` plugin and enables it;
+- links the repository as the `hazat.word-fixer` overlay/bar-widget plugin, enables it, and places its status icon in the right bar section;
 - links `linux/bin/word-fixer` into `~/.local/bin/word-fixer`;
 - seeds only missing prompt and settings files.
 
 Existing prompt bytes are never overwritten. Existing compatible settings are also retained. `--check` is non-destructive and fails clearly if installation or dedicated model settings are incomplete; no fallback model is selected.
 
 On a machine using the managed `~/omarchy-config` setup in this repository's development environment, `word-fixer-setup` is a wrapper around the same installer and accepts `--check`.
+
+### Bar status icon
+
+The installer places the Word Fixer icon in the right side of the Omarchy bar. The idle icon means the plugin is installed, enabled, and ready for **SUPER+SHIFT+C**; it changes to the active color while a review owns the single-instance lock. Hover for status and click for a reminder of the shortcut.
+
+Word Fixer does not keep a model process running continuously. The overlay stays loaded inside `omarchy-shell`, while the Node helper starts on demand and exits after its idle timeout. The persistent bar icon therefore reports **ready**, not a permanently running helper process.
+
+On an existing installation, rerun `./linux/install` once to add the new bar slot. On a new machine, clone the checkout to a stable path, run `./linux/install`, add the binding below (or apply the managed `~/omarchy-config`), and verify with `./linux/install --check`. The installer seeds the locked SDK, prompts, settings, plugin, client link, and bar icon; it intentionally does not edit personal Hyprland bindings.
 
 ### Bind SUPER+SHIFT+C
 

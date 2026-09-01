@@ -234,6 +234,11 @@ plugin_record() {
   omarchy plugin list --json | jq -c --arg id "$PLUGIN_ID" 'map(select(.id == $id))[0] // empty'
 }
 
+bar_has_word_fixer() {
+  omarchy-shell shell listShellConfig \
+    | jq -e --arg id "$PLUGIN_ID" '[.bar.layout?[]?[]? | select(.id == $id)] | length == 1' >/dev/null
+}
+
 install_plugin() {
   local record=""
   ensure_link "$ROOT" "$PLUGIN_LINK" "Omarchy plugin"
@@ -246,7 +251,13 @@ install_plugin() {
   done
   [[ -n $record ]] || fail "Omarchy did not discover plugin $PLUGIN_ID after rescan."
 
-  if ! jq -e '.enabled == true' <<<"$record" >/dev/null; then
+  if ! bar_has_word_fixer; then
+    # Older overlay-only installs enabled the plugin through plugins[]. Remove
+    # that legacy location before `bar put`, which otherwise mistakes it for an
+    # existing bar slot. The bar entry enables both plugin kinds.
+    omarchy plugin disable "$PLUGIN_ID" >/dev/null 2>&1 || true
+    omarchy bar put "$PLUGIN_ID" --section right >/dev/null
+  elif ! jq -e '.enabled == true' <<<"$record" >/dev/null; then
     omarchy plugin enable "$PLUGIN_ID" >/dev/null
   fi
 }
@@ -305,10 +316,18 @@ check_installation() {
   fi
 
   record="$(plugin_record)"
-  if [[ -n $record ]] && jq -e '.enabled == true and (.kinds | index("overlay") != null)' <<<"$record" >/dev/null; then
-    ok "summonable plugin enablement: $PLUGIN_ID (enabled overlay)"
+  if [[ -n $record ]] && jq -e \
+      '.enabled == true and (.kinds | index("overlay") != null) and (.kinds | index("bar-widget") != null)' \
+      <<<"$record" >/dev/null; then
+    ok "plugin enablement: $PLUGIN_ID (overlay and bar widget)"
   else
-    missing "enabled Omarchy overlay plugin: $PLUGIN_ID" || failures=$((failures + 1))
+    missing "enabled Omarchy overlay/bar-widget plugin: $PLUGIN_ID" || failures=$((failures + 1))
+  fi
+
+  if bar_has_word_fixer; then
+    ok "bar status icon: $PLUGIN_ID"
+  else
+    missing "bar status icon: $PLUGIN_ID" || failures=$((failures + 1))
   fi
 
   if link_matches "$CLIENT_LINK" "$ROOT/linux/bin/word-fixer" \

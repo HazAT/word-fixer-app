@@ -164,13 +164,21 @@ test('optional aggregate cost uses the established compact display', () => {
   assert.equal(Model.formatCost(undefined), '');
 });
 
-test('manifest and QML declare one keep-loaded bounded native overlay', async () => {
+test('manifest and QML declare a keep-loaded overlay with a ready-state bar icon', async () => {
   const manifest = JSON.parse(await fs.readFile(path.join(repositoryRoot, 'manifest.json'), 'utf8'));
   const qml = await fs.readFile(path.join(repositoryRoot, manifest.entryPoints.overlay), 'utf8');
+  const barWidget = await fs.readFile(path.join(repositoryRoot, manifest.entryPoints.barWidget), 'utf8');
 
   assert.equal(manifest.schemaVersion, 1);
-  assert.deepEqual(manifest.kinds, ['overlay']);
+  assert.deepEqual(manifest.kinds, ['overlay', 'bar-widget']);
   assert.equal(manifest.keepLoaded, true);
+  assert.equal(manifest.barWidget.defaultSection, 'right');
+  assert.equal(manifest.barWidget.allowMultiple, false);
+  assert.match(barWidget, /BarWidget\s*\{/);
+  assert.match(barWidget, /Word Fixer ready · SUPER\+SHIFT\+C/);
+  assert.match(barWidget, /active\.lock\/owner\.json/);
+  assert.match(barWidget, /active: root\.reviewing/);
+  assert.match(barWidget, /interval: 750/);
   assert.match(qml, /function open\(locatorJson\)/);
   assert.match(qml, /id: payloadReader/);
   assert.match(qml, /payloadReader\.reload\(\)/);

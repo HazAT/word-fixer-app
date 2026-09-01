@@ -50,7 +50,7 @@ async function createHarness(t, { modelAvailable = true, npmAvailable = true } =
   await fs.mkdir(path.join(home, '.pi', 'agent'), { recursive: true });
   await fs.mkdir(stubBin, { recursive: true });
   await fs.writeFile(path.join(home, '.pi', 'agent', 'auth.json'), '{"openai-codex":"canonical-test-auth"}\n');
-  await fs.writeFile(stateFile, JSON.stringify({ discovered: false, enabled: false }));
+  await fs.writeFile(stateFile, JSON.stringify({ discovered: false, enabled: false, bar: false }));
 
   await writeExecutable(path.join(stubBin, 'pi'), `#!/usr/bin/env bash
 set -euo pipefail
@@ -102,6 +102,15 @@ elif [[ \${1:-} == shell && \${2:-} == rescanPlugins ]]; then
 elif [[ \${1:-} == shell && \${2:-} == summon ]]; then
   node -e 'const fs=require("fs");const s=JSON.parse(fs.readFileSync(process.env.WF_STUB_STATE));process.exit(s.discovered&&s.enabled?0:1)'
   echo ok
+elif [[ \${1:-} == shell && \${2:-} == listShellConfig ]]; then
+  node - <<'NODE'
+const fs = require('fs');
+const state = JSON.parse(fs.readFileSync(process.env.WF_STUB_STATE));
+process.stdout.write(JSON.stringify({
+  bar: { layout: { left: [], center: [], right: state.bar ? [{ id: 'hazat.word-fixer' }] : [] } },
+  plugins: state.enabled && !state.bar ? [{ id: 'hazat.word-fixer' }] : [],
+}));
+NODE
 else
   exit 2
 fi
@@ -110,19 +119,20 @@ fi
   await writeExecutable(path.join(stubBin, 'omarchy'), `#!/usr/bin/env bash
 set -euo pipefail
 printf 'omarchy %s\\n' "$*" >>"$WF_STUB_LOG"
-[[ \${1:-} == plugin ]] || exit 2
-case \${2:-} in
-  validate)
-    [[ -f \${3:-}/manifest.json ]]
-    ;;
-  list)
-    node - <<'NODE'
+case \${1:-} in
+  plugin)
+    case \${2:-} in
+      validate)
+        [[ -f \${3:-}/manifest.json ]]
+        ;;
+      list)
+        node - <<'NODE'
 const fs = require('fs');
 const state = JSON.parse(fs.readFileSync(process.env.WF_STUB_STATE));
 process.stdout.write(JSON.stringify(state.discovered ? [{
   id: 'hazat.word-fixer',
   name: 'Word Fixer',
-  kinds: ['overlay'],
+  kinds: ['overlay', 'bar-widget'],
   enabled: state.enabled,
   active: false,
   canDisable: true,
@@ -130,11 +140,23 @@ process.stdout.write(JSON.stringify(state.discovered ? [{
   clonedFrom: '',
 }] : []));
 NODE
+        ;;
+      enable)
+        [[ \${3:-} == hazat.word-fixer ]]
+        node -e 'const fs=require("fs");const p=process.env.WF_STUB_STATE;const s=JSON.parse(fs.readFileSync(p));if(!s.discovered)process.exit(1);s.enabled=true;fs.writeFileSync(p,JSON.stringify(s))'
+        echo 'Enabled hazat.word-fixer'
+        ;;
+      disable)
+        [[ \${3:-} == hazat.word-fixer ]]
+        node -e 'const fs=require("fs");const p=process.env.WF_STUB_STATE;const s=JSON.parse(fs.readFileSync(p));s.enabled=false;s.bar=false;fs.writeFileSync(p,JSON.stringify(s))'
+        echo 'Disabled hazat.word-fixer'
+        ;;
+      *) exit 2 ;;
+    esac
     ;;
-  enable)
-    [[ \${3:-} == hazat.word-fixer ]]
-    node -e 'const fs=require("fs");const p=process.env.WF_STUB_STATE;const s=JSON.parse(fs.readFileSync(p));if(!s.discovered)process.exit(1);s.enabled=true;fs.writeFileSync(p,JSON.stringify(s))'
-    echo 'Enabled hazat.word-fixer'
+  bar)
+    [[ \${2:-} == put && \${3:-} == hazat.word-fixer ]]
+    node -e 'const fs=require("fs");const p=process.env.WF_STUB_STATE;const s=JSON.parse(fs.readFileSync(p));if(!s.discovered)process.exit(1);s.enabled=true;s.bar=true;fs.writeFileSync(p,JSON.stringify(s))'
     ;;
   *) exit 2 ;;
 esac
@@ -194,7 +216,8 @@ test('check mode is clear and non-destructive before and after installation', as
 
   const check = runInstaller(harness, ['--check']);
   assert.equal(check.status, 0, check.stderr);
-  assert.match(check.stdout, /summonable plugin enablement: hazat\.word-fixer \(enabled overlay\)/);
+  assert.match(check.stdout, /plugin enablement: hazat\.word-fixer \(overlay and bar widget\)/);
+  assert.match(check.stdout, /bar status icon: hazat\.word-fixer/);
   assert.match(check.stdout, /auth remains canonical only/);
   assert.deepEqual(await snapshotTree(harness.home), installedSnapshot);
 });
@@ -247,12 +270,18 @@ test('an offline second install is idempotent and preserves custom config outsid
   assert.equal(await fs.readlink(path.join(harness.home, '.config', 'omarchy', 'plugins', 'hazat.word-fixer')), repositoryRoot);
   assert.equal(await fs.readlink(path.join(harness.binHome, 'word-fixer')), path.join(repositoryRoot, 'linux', 'bin', 'word-fixer'));
   assert.equal(await fs.access(path.join(piDirectory, 'auth.json')).then(() => true, () => false), false);
-  assert.deepEqual(JSON.parse(await fs.readFile(harness.stateFile, 'utf8')), { discovered: true, enabled: true });
+  assert.deepEqual(JSON.parse(await fs.readFile(harness.stateFile, 'utf8')), {
+    discovered: true,
+    enabled: true,
+    bar: true,
+  });
 
   const commandLog = await fs.readFile(harness.commandLog, 'utf8');
   assert.match(commandLog, /omarchy plugin validate/);
   assert.match(commandLog, /omarchy-shell shell rescanPlugins/);
-  assert.equal((commandLog.match(/omarchy plugin enable hazat\.word-fixer/g) || []).length, 1);
+  assert.equal((commandLog.match(/omarchy plugin enable hazat\.word-fixer/g) || []).length, 0);
+  assert.equal((commandLog.match(/omarchy plugin disable hazat\.word-fixer/g) || []).length, 1);
+  assert.equal((commandLog.match(/omarchy bar put hazat\.word-fixer --section right/g) || []).length, 1);
   assert.equal((commandLog.match(/npm ci --omit=dev --ignore-scripts --no-audit --no-fund/g) || []).length, 1);
   assert.equal(await fs.access(path.join(repositoryRoot, 'node_modules')).then(() => true, () => false), false);
   assert.equal(await fs.access(path.join(repositoryRoot, 'helper', 'node_modules')).then(() => true, () => false), false);
