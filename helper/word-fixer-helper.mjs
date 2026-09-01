@@ -24,9 +24,9 @@ const config = await loadWordFixerConfig();
 const debugEnabled = process.env.WORD_FIXER_DEBUG === '1' || config.debugLogging === true;
 const logger = createLogger({
   debugEnabled,
-  logFile: path.join(config.configDir, 'debug.log'),
+  logFile: path.join(config.dataDir, 'debug.log'),
 });
-const helperStatePath = path.join(config.configDir, 'helper.json');
+const helperStatePath = path.join(config.dataDir, 'helper.json');
 
 let servicesPromise = null;
 let server = null;
@@ -81,7 +81,7 @@ async function ensureServices() {
   if (!servicesPromise) {
     servicesPromise = loadPiServices({
       piDir: config.piDir,
-      piBinaryPath: config.piBinaryPath,
+      dataDir: config.dataDir,
       cwd,
       log: logger,
     });

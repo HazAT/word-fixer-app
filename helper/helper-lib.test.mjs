@@ -116,24 +116,35 @@ async function waitFor(predicate) {
   throw new Error('Timed out waiting for test condition.');
 }
 
-test('finds the SDK entry point when the Pi binary is nested under dist/bundle', async (t) => {
-  const temporaryDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'word-fixer-pi-sdk-'));
-  t.after(() => fs.rm(temporaryDirectory, { recursive: true, force: true }));
+test('resolves the locked app-owned SDK without inspecting the Pi CLI package', async (t) => {
+  const dataDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'word-fixer-pi-sdk-'));
+  t.after(() => fs.rm(dataDirectory, { recursive: true, force: true }));
 
-  const packageRoot = path.join(temporaryDirectory, 'pi-package');
-  const cliPath = path.join(packageRoot, 'dist', 'bundle', 'cli.js');
-  const sdkPath = path.join(packageRoot, 'dist', 'index.js');
-  const binaryPath = path.join(temporaryDirectory, 'bin', 'pi');
-  await fs.mkdir(path.dirname(cliPath), { recursive: true });
-  await fs.mkdir(path.dirname(binaryPath), { recursive: true });
-  await fs.writeFile(path.join(packageRoot, 'package.json'), JSON.stringify({ name: '@earendil-works/pi-coding-agent' }));
-  await fs.writeFile(cliPath, '');
-  await fs.writeFile(sdkPath, '');
-  await fs.symlink(cliPath, binaryPath);
+  const sdkDirectory = path.join(dataDirectory, 'sdk');
+  const packageRoot = path.join(sdkDirectory, 'node_modules', '@earendil-works', 'pi-coding-agent');
+  const sdkPath = path.join(packageRoot, 'sdk.js');
+  await fs.mkdir(packageRoot, { recursive: true });
+  await fs.writeFile(path.join(sdkDirectory, 'package.json'), '{"private":true,"type":"module"}\n');
+  await fs.writeFile(path.join(packageRoot, 'package.json'), JSON.stringify({
+    name: '@earendil-works/pi-coding-agent',
+    type: 'module',
+    exports: './sdk.js',
+  }));
+  await fs.writeFile(sdkPath, 'export const testSdk = true;\n');
+  const loaderPath = path.join(sdkDirectory, 'sdk-loader.mjs');
+  await fs.writeFile(loaderPath, "export * from '@earendil-works/pi-coding-agent';\n");
 
-  const sdkUrl = await resolvePiSdkModuleUrl(binaryPath);
+  const sdkUrl = await resolvePiSdkModuleUrl(dataDirectory);
 
-  assert.equal(fileURLToPath(sdkUrl), await fs.realpath(sdkPath));
+  assert.equal(fileURLToPath(sdkUrl), await fs.realpath(loaderPath));
+  assert.equal((await import(sdkUrl.href)).testSdk, true);
+});
+
+test('reports a clear setup error when the app-owned SDK is missing', async (t) => {
+  const dataDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'word-fixer-pi-sdk-missing-'));
+  t.after(() => fs.rm(dataDirectory, { recursive: true, force: true }));
+
+  await assert.rejects(resolvePiSdkModuleUrl(dataDirectory), /Run word-fixer-setup/);
 });
 
 test('round-trips mixed line breaks and intentional blank lines exactly', () => {

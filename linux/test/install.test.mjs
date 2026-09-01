@@ -38,30 +38,21 @@ async function snapshotTree(root) {
   return entries;
 }
 
-async function createHarness(t, { modelAvailable = true } = {}) {
+async function createHarness(t, { modelAvailable = true, npmAvailable = true } = {}) {
   const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'word-fixer-install-test-'));
   t.after(() => fs.rm(temporaryRoot, { recursive: true, force: true }));
 
   const home = path.join(temporaryRoot, 'home');
   const stubBin = path.join(temporaryRoot, 'stubs');
-  const sdkRoot = path.join(temporaryRoot, 'pi-sdk');
-  const sdkBin = path.join(sdkRoot, 'bin');
   const binHome = path.join(home, '.local', 'bin');
   const stateFile = path.join(temporaryRoot, 'plugin-state.json');
   const commandLog = path.join(temporaryRoot, 'commands.log');
   await fs.mkdir(path.join(home, '.pi', 'agent'), { recursive: true });
   await fs.mkdir(stubBin, { recursive: true });
-  await fs.mkdir(path.join(sdkRoot, 'dist'), { recursive: true });
-  await fs.mkdir(sdkBin, { recursive: true });
   await fs.writeFile(path.join(home, '.pi', 'agent', 'auth.json'), '{"openai-codex":"canonical-test-auth"}\n');
-  await fs.writeFile(path.join(sdkRoot, 'package.json'), JSON.stringify({
-    name: '@earendil-works/pi-coding-agent',
-    version: '0.84.4-test',
-  }));
-  await fs.writeFile(path.join(sdkRoot, 'dist', 'index.js'), 'export const testSdk = true;\n');
   await fs.writeFile(stateFile, JSON.stringify({ discovered: false, enabled: false }));
 
-  await writeExecutable(path.join(sdkBin, 'pi'), `#!/usr/bin/env bash
+  await writeExecutable(path.join(stubBin, 'pi'), `#!/usr/bin/env bash
 set -euo pipefail
 printf 'pi %s\\n' "$*" >>"$WF_STUB_LOG"
 if [[ \${1:-} == --list-models ]]; then
@@ -79,7 +70,26 @@ if [[ \${1:-} == --version ]]; then
 fi
 exit 2
 `);
-  await fs.symlink(path.join(sdkBin, 'pi'), path.join(stubBin, 'pi'));
+
+  await writeExecutable(path.join(stubBin, 'npm'), `#!/usr/bin/env bash
+set -euo pipefail
+printf 'npm %s\n' "$*" >>"$WF_STUB_LOG"
+if [[ \${1:-} == --version ]]; then
+  echo 11.19.0-test
+  exit 0
+fi
+[[ \${1:-} == ci ]] || exit 2
+${npmAvailable ? ':' : 'echo "offline cache miss" >&2; exit 42'}
+if [[ \${WF_STUB_NPM_INSTALL_DISABLED:-0} == 1 ]]; then
+  echo "offline package installation disabled" >&2
+  exit 42
+fi
+package_dir="$PWD/node_modules/@earendil-works/pi-coding-agent"
+mkdir -p "$package_dir/dist"
+version="$(node -p 'JSON.parse(require("fs").readFileSync("package.json")).dependencies["@earendil-works/pi-coding-agent"]')"
+printf '{"name":"@earendil-works/pi-coding-agent","version":"%s","type":"module","exports":"./dist/index.js"}\n' "$version" >"$package_dir/package.json"
+printf 'export const testSdk = true;\n' >"$package_dir/dist/index.js"
+`);
 
   await writeExecutable(path.join(stubBin, 'omarchy-shell'), `#!/usr/bin/env bash
 set -euo pipefail
@@ -138,13 +148,21 @@ esac
     ...process.env,
     HOME: home,
     XDG_CONFIG_HOME: path.join(home, '.config'),
-    XDG_BIN_HOME: binHome,
+    XDG_DATA_HOME: path.join(home, 'xdg-data'),
     PATH: [binHome, stubBin, path.dirname(process.execPath), '/usr/bin', '/bin'].join(':'),
     WF_STUB_STATE: stateFile,
     WF_STUB_LOG: commandLog,
   };
 
-  return { temporaryRoot, home, binHome, stateFile, commandLog, env };
+  return {
+    temporaryRoot,
+    home,
+    binHome,
+    dataDirectory: path.join(home, 'xdg-data', 'word-fixer'),
+    stateFile,
+    commandLog,
+    env,
+  };
 }
 
 function runInstaller(harness, args = []) {
@@ -181,7 +199,7 @@ test('check mode is clear and non-destructive before and after installation', as
   assert.deepEqual(await snapshotTree(harness.home), installedSnapshot);
 });
 
-test('two installs preserve custom prompt bytes and produce dedicated config plus source links', async (t) => {
+test('an offline second install is idempotent and preserves custom config outside the checkout', async (t) => {
   const harness = await createHarness(t);
   const piDirectory = path.join(harness.home, '.config', 'word-fixer', '.pi');
   const customPrompt = Buffer.from('Keep $(literal) <markup> 😀 exactly\r\nsecond line', 'utf8');
@@ -200,6 +218,7 @@ test('two installs preserve custom prompt bytes and produce dedicated config plu
   "customMarker": "preserve these bytes"
 }\n`);
   await fs.writeFile(path.join(piDirectory, 'settings.json'), customSettings);
+  harness.env.WF_STUB_NPM_INSTALL_DISABLED = '1';
   const secondInstall = runInstaller(harness);
   assert.equal(secondInstall.status, 0, secondInstall.stderr);
   assert.deepEqual(await fs.readFile(path.join(piDirectory, 'NATURAL.md')), customPrompt);
@@ -207,7 +226,20 @@ test('two installs preserve custom prompt bytes and produce dedicated config plu
 
   const configDirectory = path.join(harness.home, '.config', 'word-fixer');
   const config = JSON.parse(await fs.readFile(path.join(configDirectory, 'config.json'), 'utf8'));
-  assert.equal(config.piBinaryPath, path.join(configDirectory, 'bin', 'pi'));
+  assert.equal(config.nodeBinaryPath, path.join(harness.dataDirectory, 'bin', 'node'));
+  assert.equal('piBinaryPath' in config, false);
+  assert.equal(
+    JSON.parse(await fs.readFile(path.join(
+      harness.dataDirectory,
+      'sdk',
+      'node_modules',
+      '@earendil-works',
+      'pi-coding-agent',
+      'package.json',
+    ), 'utf8')).version,
+    '0.84.4',
+  );
+  assert.equal(await fs.readlink(path.join(harness.dataDirectory, 'bin', 'node')), process.execPath);
   const settings = JSON.parse(customSettings);
   assert.equal(settings.defaultProvider, 'openai-codex');
   assert.equal(settings.defaultModel, 'gpt-5.4-mini');
@@ -221,6 +253,22 @@ test('two installs preserve custom prompt bytes and produce dedicated config plu
   assert.match(commandLog, /omarchy plugin validate/);
   assert.match(commandLog, /omarchy-shell shell rescanPlugins/);
   assert.equal((commandLog.match(/omarchy plugin enable hazat\.word-fixer/g) || []).length, 1);
+  assert.equal((commandLog.match(/npm ci --omit=dev --ignore-scripts --no-audit --no-fund/g) || []).length, 1);
+  assert.equal(await fs.access(path.join(repositoryRoot, 'node_modules')).then(() => true, () => false), false);
+  assert.equal(await fs.access(path.join(repositoryRoot, 'helper', 'node_modules')).then(() => true, () => false), false);
+});
+
+test('an unavailable locked package install fails clearly without a partial SDK', async (t) => {
+  const harness = await createHarness(t, { npmAvailable: false });
+  const install = runInstaller(harness);
+
+  assert.notEqual(install.status, 0);
+  assert.match(install.stderr, /could not install the locked @earendil-works\/pi-coding-agent dependency/);
+  assert.match(install.stderr, /Restore network access or populate the app npm cache/);
+  assert.equal(await fs.access(path.join(harness.dataDirectory, 'sdk')).then(() => true, () => false), false);
+  const dataEntries = await fs.readdir(harness.dataDirectory);
+  assert.equal(dataEntries.some((entry) => entry.startsWith('.sdk-install.')), false);
+  assert.equal(await fs.access(path.join(repositoryRoot, 'helper', 'node_modules')).then(() => true, () => false), false);
 });
 
 test('missing command and unavailable dedicated model fail before installation mutations', async (t) => {
@@ -232,7 +280,7 @@ test('missing command and unavailable dedicated model fail before installation m
     encoding: 'utf8',
   });
   assert.notEqual(missingCommand.status, 0);
-  assert.match(missingCommand.stderr, /required command 'pi' was not found on PATH/);
+  assert.match(missingCommand.stderr, /required command 'npm' was not found on PATH/);
   assert.equal(await fs.access(path.join(emptyHome, '.config', 'word-fixer')).then(() => true, () => false), false);
 
   const harness = await createHarness(t, { modelAvailable: false });

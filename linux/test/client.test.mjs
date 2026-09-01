@@ -337,7 +337,7 @@ test('helper client reuses a healthy API-v3 helper and preserves request text in
     path.join(configDirectory, 'helper.json'),
     JSON.stringify({ pid: process.pid, port, apiVersion: 3 }),
   );
-  const helper = new HelperClient({ configDirectory });
+  const helper = new HelperClient({ configDirectory, dataDirectory: configDirectory });
   const text = 'Unicode 😀\n$(not argv)\n'.repeat(100);
   const review = await helper.review(text);
 

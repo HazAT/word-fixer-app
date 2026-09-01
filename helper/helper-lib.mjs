@@ -1,8 +1,7 @@
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-
-const piPackageName = '@earendil-works/pi-coding-agent';
 
 export const REVIEW_MODEL = Object.freeze({
   provider: 'openai-codex',
@@ -152,39 +151,35 @@ export function resolveConfigDir() {
   if (process.env.WORD_FIXER_CONFIG_DIR) {
     return process.env.WORD_FIXER_CONFIG_DIR;
   }
-  return path.join(process.env.HOME ?? '', '.config', 'word-fixer');
+  return path.join(process.env.XDG_CONFIG_HOME ?? path.join(process.env.HOME ?? os.homedir(), '.config'), 'word-fixer');
+}
+
+export function resolveDataDir() {
+  if (process.env.WORD_FIXER_DATA_DIR) {
+    return process.env.WORD_FIXER_DATA_DIR;
+  }
+  return path.join(process.env.XDG_DATA_HOME ?? path.join(process.env.HOME ?? os.homedir(), '.local', 'share'), 'word-fixer');
 }
 
 export async function loadWordFixerConfig() {
   const configDir = resolveConfigDir();
   const configPath = path.join(configDir, 'config.json');
   const piDir = path.join(configDir, '.pi');
+  const dataDir = resolveDataDir();
   const raw = await fs.readFile(configPath, 'utf8');
   const config = JSON.parse(raw);
-  return { configDir, configPath, piDir, ...config };
+  return { ...config, configDir, configPath, piDir, dataDir };
 }
 
-export async function resolvePiSdkModuleUrl(piBinaryPath) {
-  const realPiPath = await fs.realpath(piBinaryPath);
-  let directory = path.dirname(realPiPath);
-
-  while (true) {
-    try {
-      const packageJson = JSON.parse(await fs.readFile(path.join(directory, 'package.json'), 'utf8'));
-      if (packageJson.name === piPackageName) {
-        return pathToFileURL(path.join(directory, 'dist', 'index.js'));
-      }
-    } catch (error) {
-      if (error?.code !== 'ENOENT') {
-        throw error;
-      }
+export async function resolvePiSdkModuleUrl(dataDir = resolveDataDir()) {
+  const sdkDirectory = path.join(dataDir, 'sdk');
+  try {
+    return pathToFileURL(await fs.realpath(path.join(sdkDirectory, 'sdk-loader.mjs')));
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      throw new Error(`Word Fixer SDK is not installed at ${sdkDirectory}. Run word-fixer-setup.`, { cause: error });
     }
-
-    const parent = path.dirname(directory);
-    if (parent === directory) {
-      throw new Error(`Could not find the ${piPackageName} package containing ${realPiPath}`);
-    }
-    directory = parent;
+    throw error;
   }
 }
 
@@ -215,8 +210,8 @@ export function createLogger({ debugEnabled, logFile }) {
   };
 }
 
-export async function loadPiServices({ piDir, piBinaryPath, cwd, log }) {
-  const sdkUrl = await resolvePiSdkModuleUrl(piBinaryPath);
+export async function loadPiServices({ piDir, dataDir, cwd, log }) {
+  const sdkUrl = await resolvePiSdkModuleUrl(dataDir);
   const sdk = await import(sdkUrl.href);
   const {
     DefaultResourceLoader,
@@ -224,11 +219,11 @@ export async function loadPiServices({ piDir, piBinaryPath, cwd, log }) {
     SessionManager,
     SettingsManager,
     createAgentSession,
-    getAgentDir,
   } = sdk;
 
-  const authPath = path.join(getAgentDir(), 'auth.json');
+  const authPath = path.join(process.env.HOME ?? os.homedir(), '.pi', 'agent', 'auth.json');
   const modelsPath = path.join(piDir, 'models.json');
+  const modelsStorePath = path.join(dataDir, 'models-store.json');
   const promptPaths = {
     correction: path.join(piDir, 'SYSTEM.md'),
     natural: path.join(piDir, 'NATURAL.md'),
@@ -237,7 +232,7 @@ export async function loadPiServices({ piDir, piBinaryPath, cwd, log }) {
   const prompts = Object.fromEntries(await Promise.all(
     Object.entries(promptPaths).map(async ([name, promptPath]) => [name, await fs.readFile(promptPath, 'utf8')]),
   ));
-  const modelRuntime = await ModelRuntime.create({ authPath, modelsPath });
+  const modelRuntime = await ModelRuntime.create({ authPath, modelsPath, modelsStorePath });
   const model = modelRuntime.getModel(REVIEW_MODEL.provider, REVIEW_MODEL.id);
   if (!model) {
     throw new Error(`Required model ${REVIEW_MODEL.provider}/${REVIEW_MODEL.id} is unavailable.`);
@@ -249,6 +244,7 @@ export async function loadPiServices({ piDir, piBinaryPath, cwd, log }) {
     piDir,
     authPath,
     modelsPath,
+    modelsStorePath,
     promptPaths,
     model: `${REVIEW_MODEL.provider}/${REVIEW_MODEL.id}`,
   });

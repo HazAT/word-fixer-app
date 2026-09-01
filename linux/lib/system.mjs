@@ -134,14 +134,17 @@ async function fetchJson(url, body, { signal, timeoutMs }) {
 export class HelperClient {
   constructor({
     configDirectory = process.env.WORD_FIXER_CONFIG_DIR
-      || path.join(process.env.HOME || os.homedir(), '.config', 'word-fixer'),
+      || path.join(process.env.XDG_CONFIG_HOME || path.join(process.env.HOME || os.homedir(), '.config'), 'word-fixer'),
+    dataDirectory = process.env.WORD_FIXER_DATA_DIR
+      || path.join(process.env.XDG_DATA_HOME || path.join(process.env.HOME || os.homedir(), '.local', 'share'), 'word-fixer'),
     helperScript = path.join(repositoryRoot, 'helper', 'word-fixer-helper.mjs'),
     helperStartupTimeoutMs = 5_000,
     reviewTimeoutMs = 35_000,
     environment = process.env,
   } = {}) {
     this.configDirectory = configDirectory;
-    this.helperStatePath = path.join(configDirectory, 'helper.json');
+    this.dataDirectory = dataDirectory;
+    this.helperStatePath = path.join(dataDirectory, 'helper.json');
     this.helperScript = helperScript;
     this.helperStartupTimeoutMs = helperStartupTimeoutMs;
     this.reviewTimeoutMs = reviewTimeoutMs;
@@ -174,10 +177,10 @@ export class HelperClient {
 
   async launch() {
     const config = JSON.parse(await fs.readFile(path.join(this.configDirectory, 'config.json'), 'utf8'));
-    if (typeof config.piBinaryPath !== 'string' || !path.isAbsolute(config.piBinaryPath)) {
-      throw new Error('Word Fixer config has no absolute piBinaryPath.');
+    if (typeof config.nodeBinaryPath !== 'string' || !path.isAbsolute(config.nodeBinaryPath)) {
+      throw new Error('Word Fixer config has no absolute nodeBinaryPath.');
     }
-    const nodePath = path.join(path.dirname(config.piBinaryPath), 'node');
+    const nodePath = config.nodeBinaryPath;
     await fs.access(nodePath, fs.constants.X_OK);
     await fs.access(this.helperScript, fs.constants.R_OK);
     await fs.rm(this.helperStatePath, { force: true });
@@ -190,8 +193,9 @@ export class HelperClient {
       env: {
         ...this.environment,
         WORD_FIXER_CONFIG_DIR: this.configDirectory,
+        WORD_FIXER_DATA_DIR: this.dataDirectory,
         WORD_FIXER_HELPER_CWD: repositoryRoot,
-        PATH: `${path.dirname(config.piBinaryPath)}:${this.environment.PATH || '/usr/bin:/bin'}`,
+        PATH: `${path.dirname(nodePath)}:${this.environment.PATH || '/usr/bin:/bin'}`,
       },
     });
     child.unref();

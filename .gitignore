@@ -6,6 +6,7 @@ Resources/AppIcon.icns
 Resources/AppIcon.iconset/
 *.o
 *.d
+/helper/node_modules/
 
 # Linux generated/runtime state
 /word-fixer/

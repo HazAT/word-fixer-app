@@ -5,21 +5,30 @@ umask 077
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 PLUGIN_ID="hazat.word-fixer"
+SDK_PACKAGE="@earendil-works/pi-coding-agent"
 PROVIDER="openai-codex"
 MODEL="gpt-5.4-mini"
 CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
-BIN_HOME="${XDG_BIN_HOME:-$HOME/.local/bin}"
+DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
+BIN_HOME="$HOME/.local/bin"
 CONFIG_DIR="$CONFIG_HOME/word-fixer"
 PI_DIR="$CONFIG_DIR/.pi"
-SUPPORT_BIN_DIR="$CONFIG_DIR/bin"
+DATA_DIR="$DATA_HOME/word-fixer"
+SDK_DIR="$DATA_DIR/sdk"
+NPM_CACHE_DIR="$DATA_DIR/npm-cache"
+SUPPORT_BIN_DIR="$DATA_DIR/bin"
 CONFIG_FILE="$CONFIG_DIR/config.json"
 SETTINGS_FILE="$PI_DIR/settings.json"
 AUTH_FILE="$HOME/.pi/agent/auth.json"
+SDK_MANIFEST="$ROOT/helper/package.json"
+SDK_LOCKFILE="$ROOT/helper/package-lock.json"
+SDK_LOADER="$ROOT/helper/sdk-loader.mjs"
 PLUGIN_LINK="$HOME/.config/omarchy/plugins/$PLUGIN_ID"
 CLIENT_LINK="$BIN_HOME/word-fixer"
 CHECK_ONLY=0
 PI_COMMAND=""
 NODE_COMMAND=""
+NPM_COMMAND=""
 
 usage() {
   echo "Usage: linux/install [--check]"
@@ -56,38 +65,51 @@ while (( $# > 0 )); do
   shift
 done
 
-find_pi_package() {
-  local directory package_file
-  directory="$(dirname "$(readlink -f "$PI_COMMAND")")"
-  while [[ $directory != / ]]; do
-    package_file="$directory/package.json"
-    if [[ -f $package_file ]] && jq -e '.name == "@earendil-works/pi-coding-agent"' "$package_file" >/dev/null 2>&1; then
-      [[ -r $directory/dist/index.js ]] || fail "Pi at $PI_COMMAND does not include the SDK entry point dist/index.js. Install an SDK-capable @earendil-works/pi-coding-agent distribution; no model fallback will be used."
-      printf '%s\n' "$directory"
-      return
-    fi
-    directory="$(dirname "$directory")"
-  done
-  fail "Pi at $PI_COMMAND is not part of an @earendil-works/pi-coding-agent SDK installation."
+locked_sdk_version() {
+  jq -er --arg package "$SDK_PACKAGE" '.dependencies[$package] | select(type == "string" and test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))' "$SDK_MANIFEST"
+}
+
+sdk_is_current() {
+  local installed_package="$SDK_DIR/node_modules/@earendil-works/pi-coding-agent/package.json"
+  [[ -r $SDK_DIR/package.json && -r $SDK_DIR/package-lock.json && -r $installed_package ]] || return 1
+  cmp -s "$SDK_MANIFEST" "$SDK_DIR/package.json" || return 1
+  cmp -s "$SDK_LOCKFILE" "$SDK_DIR/package-lock.json" || return 1
+  cmp -s "$SDK_LOADER" "$SDK_DIR/sdk-loader.mjs" || return 1
+  [[ $(jq -er '.version' "$installed_package" 2>/dev/null) == "$(locked_sdk_version)" ]] || return 1
+  SDK_CHECK_DIR="$SDK_DIR" "$NODE_COMMAND" --input-type=module -e '
+    import path from "node:path";
+    import { pathToFileURL } from "node:url";
+    await import(pathToFileURL(path.join(process.env.SDK_CHECK_DIR, "sdk-loader.mjs")));
+  ' >/dev/null 2>&1
 }
 
 preflight() {
-  local command_name node_major model_output auth_output package_dir
-  local required_commands=(node jq wl-copy wl-paste hyprctl notify-send omarchy omarchy-shell pi)
+  local command_name node_version model_output auth_output sdk_version
+  local required_commands=(node npm jq wl-copy wl-paste hyprctl notify-send omarchy omarchy-shell pi)
 
   for command_name in "${required_commands[@]}"; do
     command -v "$command_name" >/dev/null 2>&1 || fail "required command '$command_name' was not found on PATH."
   done
 
   NODE_COMMAND="$(command -v node)"
+  NPM_COMMAND="$(command -v npm)"
   PI_COMMAND="$(command -v pi)"
   [[ $NODE_COMMAND == /* && -x $NODE_COMMAND ]] || fail "node must resolve to an absolute executable path."
+  [[ $NPM_COMMAND == /* && -x $NPM_COMMAND ]] || fail "npm must resolve to an absolute executable path."
   [[ $PI_COMMAND == /* && -x $PI_COMMAND ]] || fail "pi must resolve to an absolute executable path."
 
-  node_major="$($NODE_COMMAND -p 'Number(process.versions.node.split(".")[0])')"
-  [[ $node_major =~ ^[0-9]+$ && $node_major -ge 22 ]] || fail "Node.js 22 or newer is required (found $($NODE_COMMAND --version))."
+  node_version="$($NODE_COMMAND -p 'process.versions.node')"
+  "$NODE_COMMAND" -e '
+    const [major, minor] = process.versions.node.split(".").map(Number);
+    process.exit(major > 22 || (major === 22 && minor >= 19) ? 0 : 1);
+  ' || fail "Node.js 22.19 or newer is required (found v$node_version)."
 
-  package_dir="$(find_pi_package)"
+  [[ -r $SDK_MANIFEST && -r $SDK_LOCKFILE && -r $SDK_LOADER ]] || fail "locked SDK runtime files are missing from $ROOT/helper."
+  sdk_version="$(locked_sdk_version)" || fail "$SDK_MANIFEST must pin $SDK_PACKAGE to an exact version."
+  jq -e --arg package "$SDK_PACKAGE" --arg version "$sdk_version" \
+    '.packages["node_modules/" + $package].version == $version' "$SDK_LOCKFILE" >/dev/null \
+    || fail "$SDK_LOCKFILE does not lock $SDK_PACKAGE at $sdk_version."
+
   [[ -r $AUTH_FILE ]] || fail "canonical Pi authentication is missing at $AUTH_FILE. Sign in with pi; credentials are never copied into Word Fixer config."
 
   model_output="$($PI_COMMAND --list-models "$PROVIDER/$MODEL")" || fail "could not query the required Pi model $PROVIDER/$MODEL."
@@ -110,7 +132,8 @@ preflight() {
     *) fail "$BIN_HOME is not on PATH; the installed word-fixer client would not be discoverable." ;;
   esac
 
-  ok "prerequisites: Node $($NODE_COMMAND --version), Pi SDK $package_dir"
+  ok "prerequisites: Node v$node_version, npm $($NPM_COMMAND --version), Pi $($PI_COMMAND --version)"
+  ok "locked app SDK: $SDK_PACKAGE@$sdk_version"
   ok "required model: $PROVIDER/$MODEL"
   ok "canonical auth: $AUTH_FILE"
   ok "Omarchy manifest and running shell"
@@ -147,9 +170,9 @@ write_config() {
   if [[ -e $CONFIG_FILE ]]; then
     jq -e 'type == "object"' "$CONFIG_FILE" >/dev/null \
       || fail "$CONFIG_FILE must contain a JSON object."
-    jq --arg pi "$SUPPORT_BIN_DIR/pi" '. + {piBinaryPath: $pi}' "$CONFIG_FILE" >"$temporary_file"
+    jq --arg node "$SUPPORT_BIN_DIR/node" 'del(.piBinaryPath) + {nodeBinaryPath: $node}' "$CONFIG_FILE" >"$temporary_file"
   else
-    jq -n --arg pi "$SUPPORT_BIN_DIR/pi" '{piBinaryPath: $pi, debugLogging: false}' >"$temporary_file"
+    jq -n --arg node "$SUPPORT_BIN_DIR/node" '{nodeBinaryPath: $node, debugLogging: false}' >"$temporary_file"
   fi
   chmod 600 "$temporary_file"
   mv "$temporary_file" "$CONFIG_FILE"
@@ -169,6 +192,42 @@ seed_settings() {
     >"$temporary_file"
   chmod 600 "$temporary_file"
   mv "$temporary_file" "$SETTINGS_FILE"
+}
+
+install_sdk() {
+  local temporary_directory
+  if sdk_is_current; then
+    return
+  fi
+
+  mkdir -p "$DATA_DIR" "$NPM_CACHE_DIR"
+  chmod 700 "$DATA_DIR" "$NPM_CACHE_DIR"
+  temporary_directory="$(mktemp -d "$DATA_DIR/.sdk-install.XXXXXX")"
+  cp "$SDK_MANIFEST" "$temporary_directory/package.json"
+  cp "$SDK_LOCKFILE" "$temporary_directory/package-lock.json"
+  cp "$SDK_LOADER" "$temporary_directory/sdk-loader.mjs"
+
+  if ! (
+    cd "$temporary_directory"
+    NPM_CONFIG_CACHE="$NPM_CACHE_DIR" "$NPM_COMMAND" ci --omit=dev --ignore-scripts --no-audit --no-fund
+  ); then
+    rm -rf "$temporary_directory"
+    fail "could not install the locked $SDK_PACKAGE dependency. Restore network access or populate the app npm cache at $NPM_CACHE_DIR, then run word-fixer-setup again."
+  fi
+
+  if ! (
+    SDK_CHECK_DIR="$temporary_directory" "$NODE_COMMAND" --input-type=module -e '
+      import path from "node:path";
+      import { pathToFileURL } from "node:url";
+      await import(pathToFileURL(path.join(process.env.SDK_CHECK_DIR, "sdk-loader.mjs")));
+    '
+  ); then
+    rm -rf "$temporary_directory"
+    fail "the installed $SDK_PACKAGE package could not be loaded by Node."
+  fi
+
+  rm -rf "$SDK_DIR"
+  mv "$temporary_directory" "$SDK_DIR"
 }
 
 plugin_record() {
@@ -193,19 +252,32 @@ install_plugin() {
 }
 
 check_installation() {
-  local failures=0 record config_pi
+  local failures=0 record config_node
 
-  if [[ -r $CONFIG_FILE ]] && config_pi="$(jq -er '.piBinaryPath | select(type == "string")' "$CONFIG_FILE" 2>/dev/null)" \
-      && [[ $config_pi == "$SUPPORT_BIN_DIR/pi" ]]; then
+  if [[ -r $CONFIG_FILE ]] && config_node="$(jq -er '.nodeBinaryPath | select(type == "string")' "$CONFIG_FILE" 2>/dev/null)" \
+      && [[ $config_node == "$SUPPORT_BIN_DIR/node" ]] \
+      && ! jq -e 'has("piBinaryPath")' "$CONFIG_FILE" >/dev/null 2>&1; then
     ok "app config: $CONFIG_FILE"
   else
-    missing "app config with dedicated Pi path: $CONFIG_FILE" || failures=$((failures + 1))
+    missing "app config with dedicated Node path: $CONFIG_FILE" || failures=$((failures + 1))
   fi
 
-  if link_matches "$SUPPORT_BIN_DIR/pi" "$PI_COMMAND" && link_matches "$SUPPORT_BIN_DIR/node" "$NODE_COMMAND"; then
-    ok "Pi and Node support links: $SUPPORT_BIN_DIR"
+  if link_matches "$SUPPORT_BIN_DIR/node" "$NODE_COMMAND"; then
+    ok "Node runtime link: $SUPPORT_BIN_DIR/node"
   else
-    missing "Pi and Node support links: $SUPPORT_BIN_DIR" || failures=$((failures + 1))
+    missing "Node runtime link: $SUPPORT_BIN_DIR/node" || failures=$((failures + 1))
+  fi
+
+  if sdk_is_current; then
+    ok "locked app SDK: $SDK_DIR ($SDK_PACKAGE@$(locked_sdk_version))"
+  else
+    missing "locked app SDK installation: $SDK_DIR" || failures=$((failures + 1))
+  fi
+
+  if [[ ! -e $CONFIG_DIR/helper.json && ! -e $CONFIG_DIR/debug.log && ! -e $PI_DIR/models-store.json ]]; then
+    ok "SDK and helper runtime state: $DATA_DIR"
+  else
+    missing "runtime state must not be stored under $CONFIG_DIR" || failures=$((failures + 1))
   fi
 
   if [[ -r $SETTINGS_FILE ]] && jq -e \
@@ -263,11 +335,12 @@ if (( CHECK_ONLY )); then
   exit 0
 fi
 
-mkdir -p "$CONFIG_DIR" "$PI_DIR" "$SUPPORT_BIN_DIR" "$(dirname "$PLUGIN_LINK")" "$BIN_HOME"
-chmod 700 "$CONFIG_DIR" "$PI_DIR" "$SUPPORT_BIN_DIR"
+mkdir -p "$CONFIG_DIR" "$PI_DIR" "$DATA_DIR" "$SUPPORT_BIN_DIR" "$(dirname "$PLUGIN_LINK")" "$BIN_HOME"
+chmod 700 "$CONFIG_DIR" "$PI_DIR" "$DATA_DIR" "$SUPPORT_BIN_DIR"
 
-ensure_link "$PI_COMMAND" "$SUPPORT_BIN_DIR/pi" "Pi support executable"
-ensure_link "$NODE_COMMAND" "$SUPPORT_BIN_DIR/node" "Node support executable"
+install_sdk
+rm -f "$CONFIG_DIR/helper.json" "$CONFIG_DIR/debug.log" "$PI_DIR/models-store.json"
+ensure_link "$NODE_COMMAND" "$SUPPORT_BIN_DIR/node" "Node runtime executable"
 seed_file "$ROOT/shared/prompts/SYSTEM.md" "$PI_DIR/SYSTEM.md"
 seed_file "$ROOT/shared/prompts/NATURAL.md" "$PI_DIR/NATURAL.md"
 seed_file "$ROOT/shared/prompts/FEEDBACK.md" "$PI_DIR/FEEDBACK.md"
