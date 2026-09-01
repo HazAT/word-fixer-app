@@ -413,6 +413,28 @@ test('Linux clipboard transport clears capture state, reads plain text, and writ
   assert.equal(calls.some(({ args }) => args.includes(text)), false);
 });
 
+test('Linux focus dispatch evaluates the Hyprland Lua dispatcher and verifies the target', async () => {
+  const calls = [];
+  const system = new LinuxSystem({
+    command: async (executable, args) => {
+      calls.push({ executable, args });
+      if (args[0] === '-j') return { stdout: Buffer.from(JSON.stringify(normalWindow)), stderr: '' };
+      return { stdout: Buffer.from('ok'), stderr: '' };
+    },
+  });
+  const target = {
+    address: normalWindow.address.toLowerCase(),
+    pid: normalWindow.pid,
+    initialClass: normalWindow.initialClass,
+  };
+
+  assert.equal(await system.focusAndVerify(target), true);
+  assert.deepEqual(calls[0], {
+    executable: 'hyprctl',
+    args: ['eval', `hl.dispatch(hl.dsp.focus({ window = 'address:${target.address}' }))`],
+  });
+});
+
 test('Linux copy and paste dispatch verify the exact target and emit installed chords', async () => {
   const mismatchedCalls = [];
   const mismatchedSystem = new LinuxSystem({
@@ -437,7 +459,7 @@ test('Linux copy and paste dispatch verify the exact target and emit installed c
     () => mismatchedSystem.paste(normalWindow, mismatchedTarget),
     /Refusing to paste/,
   );
-  assert.equal(mismatchedCalls.some(({ args }) => args[0] === 'dispatch'), false);
+  assert.equal(mismatchedCalls.some(({ args }) => args[0] === 'eval'), false);
 
   for (const source of [normalWindow, terminalWindow]) {
     const calls = [];
@@ -454,9 +476,11 @@ test('Linux copy and paste dispatch verify the exact target and emit installed c
     };
     await system.copy(source, target);
     await system.paste(source, target);
-    const dispatches = calls.filter(({ args }) => args[0] === 'dispatch');
+    const dispatches = calls.filter(({ args }) => args[0] === 'eval');
     const expectedCopy = source === terminalWindow ? ['CTRL', 'Insert'] : ['CTRL', 'C'];
     const expectedPaste = source === terminalWindow ? ['SHIFT', 'Insert'] : ['CTRL', 'V'];
+    assert.equal(dispatches.length, 4);
+    assert.equal(dispatches.every(({ args }) => args[1].startsWith('hl.dispatch(hl.dsp.send_key_state(')), true);
     assert.match(dispatches[0].args[1], new RegExp(`mods = '${expectedCopy[0]}'.*key = '${expectedCopy[1]}'.*state = 'down'`));
     assert.match(dispatches[1].args[1], new RegExp(`mods = '${expectedCopy[0]}'.*key = '${expectedCopy[1]}'.*state = 'up'`));
     assert.match(dispatches[2].args[1], new RegExp(`mods = '${expectedPaste[0]}'.*key = '${expectedPaste[1]}'.*state = 'down'`));

@@ -264,15 +264,15 @@ export class LinuxSystem {
       throw new Error('Refusing to copy because the source window lost focus.');
     }
     await this.command('hyprctl', [
-      'dispatch',
-      `hl.dsp.send_key_state({ mods = '${down.mods}', key = '${down.key}', state = '${down.state}' })`,
+      'eval',
+      `hl.dispatch(hl.dsp.send_key_state({ mods = '${down.mods}', key = '${down.key}', state = '${down.state}' }))`,
     ], { signal });
     try {
       await delay(50, signal);
     } finally {
       await this.command('hyprctl', [
-        'dispatch',
-        `hl.dsp.send_key_state({ mods = '${up.mods}', key = '${up.key}', state = '${up.state}' })`,
+        'eval',
+        `hl.dispatch(hl.dsp.send_key_state({ mods = '${up.mods}', key = '${up.key}', state = '${up.state}' }))`,
       ]).catch(() => {});
     }
     await delay(150, signal);
@@ -325,7 +325,7 @@ export class LinuxSystem {
     try {
       await this.command(
         'hyprctl',
-        ['dispatch', `hl.dsp.focus({ window = 'address:${target.address}' })`],
+        ['eval', `hl.dispatch(hl.dsp.focus({ window = 'address:${target.address}' }))`],
         { signal },
       );
       const deadline = Date.now() + 750;
@@ -348,15 +348,15 @@ export class LinuxSystem {
       throw new Error('Refusing to paste because the source window lost focus.');
     }
     await this.command('hyprctl', [
-      'dispatch',
-      `hl.dsp.send_key_state({ mods = '${down.mods}', key = '${down.key}', state = '${down.state}' })`,
+      'eval',
+      `hl.dispatch(hl.dsp.send_key_state({ mods = '${down.mods}', key = '${down.key}', state = '${down.state}' }))`,
     ], { signal });
     try {
       await delay(50, signal);
     } finally {
       await this.command('hyprctl', [
-        'dispatch',
-        `hl.dsp.send_key_state({ mods = '${up.mods}', key = '${up.key}', state = '${up.state}' })`,
+        'eval',
+        `hl.dispatch(hl.dsp.send_key_state({ mods = '${up.mods}', key = '${up.key}', state = '${up.state}' }))`,
       ]).catch(() => {});
     }
   }
