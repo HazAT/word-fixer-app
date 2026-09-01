@@ -23,6 +23,7 @@ AUTH_FILE="$HOME/.pi/agent/auth.json"
 SDK_MANIFEST="$ROOT/helper/package.json"
 SDK_LOCKFILE="$ROOT/helper/package-lock.json"
 SDK_LOADER="$ROOT/helper/sdk-loader.mjs"
+DEFAULT_SETTINGS="$ROOT/shared/settings.json"
 PLUGIN_LINK="$HOME/.config/omarchy/plugins/$PLUGIN_ID"
 CLIENT_LINK="$BIN_HOME/word-fixer"
 CHECK_ONLY=0
@@ -105,6 +106,10 @@ preflight() {
   ' || fail "Node.js 22.19 or newer is required (found v$node_version)."
 
   [[ -r $SDK_MANIFEST && -r $SDK_LOCKFILE && -r $SDK_LOADER ]] || fail "locked SDK runtime files are missing from $ROOT/helper."
+  [[ -r $DEFAULT_SETTINGS ]] || fail "shared Word Fixer settings are missing from $DEFAULT_SETTINGS."
+  jq -e --arg provider "$PROVIDER" --arg model "$MODEL" --arg key "$PROVIDER/$MODEL" \
+    '.defaultProvider == $provider and .defaultModel == $model and .defaultThinkingLevel == "off" and .modelThinkingLevels[$key] == "off"' \
+    "$DEFAULT_SETTINGS" >/dev/null || fail "$DEFAULT_SETTINGS does not select the required model with thinking off."
   sdk_version="$(locked_sdk_version)" || fail "$SDK_MANIFEST must pin $SDK_PACKAGE to an exact version."
   jq -e --arg package "$SDK_PACKAGE" --arg version "$sdk_version" \
     '.packages["node_modules/" + $package].version == $version' "$SDK_LOCKFILE" >/dev/null \
@@ -179,19 +184,7 @@ write_config() {
 }
 
 seed_settings() {
-  local temporary_file
-  if [[ -e $SETTINGS_FILE ]]; then
-    return 0
-  fi
-  temporary_file="$(mktemp "$PI_DIR/.settings.json.XXXXXX")"
-  jq -n \
-    --arg provider "$PROVIDER" \
-    --arg model "$MODEL" \
-    --arg key "$PROVIDER/$MODEL" \
-    '{defaultProvider: $provider, defaultModel: $model, defaultThinkingLevel: "off", modelThinkingLevels: {($key): "off"}}' \
-    >"$temporary_file"
-  chmod 600 "$temporary_file"
-  mv "$temporary_file" "$SETTINGS_FILE"
+  seed_file "$DEFAULT_SETTINGS" "$SETTINGS_FILE"
 }
 
 install_sdk() {

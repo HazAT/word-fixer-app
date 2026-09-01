@@ -13,7 +13,7 @@ actor PiHelperClient {
     private let requestTimeout: Duration = .seconds(30)
     private var helperProcess: Process?
     private var helperState: HelperState?
-    private var helperBinaryPath: String?
+    private var helperNodePath: String?
 
     func prewarm(config: AppConfig) async {
         do {
@@ -62,19 +62,19 @@ actor PiHelperClient {
 
     private func ensureRunning(config: AppConfig) async throws -> HelperState {
         if let state = helperState,
-           helperBinaryPath == config.piBinaryPath,
+           helperNodePath == config.nodeBinaryPath,
            try await isHealthy(state: state) {
             return state
         }
 
-        if helperBinaryPath != nil, helperBinaryPath != config.piBinaryPath {
+        if helperNodePath != nil, helperNodePath != config.nodeBinaryPath {
             await shutdown()
         }
 
         if let discovered = try await readHelperState(),
            try await isHealthy(state: discovered) {
             helperState = discovered
-            helperBinaryPath = config.piBinaryPath
+            helperNodePath = config.nodeBinaryPath
             DebugLog.write("PiHelperClient.ensureRunning reusing helper pid=\(discovered.pid) port=\(discovered.port)")
             return discovered
         }
@@ -82,7 +82,7 @@ actor PiHelperClient {
         try launchHelper(config: config)
         let state = try await waitForHealthyHelper()
         helperState = state
-        helperBinaryPath = config.piBinaryPath
+        helperNodePath = config.nodeBinaryPath
         return state
     }
 
@@ -99,9 +99,10 @@ actor PiHelperClient {
 
         var environment = ProcessInfo.processInfo.environment
         environment["WORD_FIXER_CONFIG_DIR"] = ConfigManager.configDir.path
+        environment["WORD_FIXER_DATA_DIR"] = ConfigManager.dataDir.path
         environment["WORD_FIXER_DEBUG"] = config.debugLogging ? "1" : "0"
         environment["WORD_FIXER_HELPER_CWD"] = FileManager.default.currentDirectoryPath
-        environment["PATH"] = URL(fileURLWithPath: config.piBinaryPath).deletingLastPathComponent().path + ":" + (environment["PATH"] ?? "/usr/bin:/bin")
+        environment["PATH"] = URL(fileURLWithPath: config.nodeBinaryPath).deletingLastPathComponent().path + ":" + (environment["PATH"] ?? "/usr/bin:/bin")
         process.environment = environment
 
         if config.debugLogging {
@@ -139,12 +140,10 @@ actor PiHelperClient {
     }
 
     private func resolveNodePath(config: AppConfig) throws -> String {
-        let piURL = URL(fileURLWithPath: config.piBinaryPath)
-        let candidate = piURL.deletingLastPathComponent().appendingPathComponent("node").path
-        if FileManager.default.isExecutableFile(atPath: candidate) {
-            return candidate
+        if FileManager.default.isExecutableFile(atPath: config.nodeBinaryPath) {
+            return config.nodeBinaryPath
         }
-        throw PiError.binaryNotFound(candidate)
+        throw PiError.binaryNotFound(config.nodeBinaryPath)
     }
 
     private func resolveHelperScriptPath() throws -> String {
@@ -219,7 +218,7 @@ actor PiHelperClient {
         helperProcess?.terminate()
         helperProcess = nil
         helperState = nil
-        helperBinaryPath = nil
+        helperNodePath = nil
     }
 }
 

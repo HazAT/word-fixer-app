@@ -17,6 +17,8 @@ ICON_SOURCE="$ROOT/Resources/AppIcon.icns"
 ICON_SCRIPT="$ROOT/scripts/build-icon.sh"
 HELPER_SOURCE_DIR="$ROOT/helper"
 HELPER_DEST_DIR="$RESOURCES_DIR/helper"
+DEFAULTS_SOURCE_DIR="$ROOT/shared"
+DEFAULTS_DEST_DIR="$RESOURCES_DIR/defaults"
 
 mkdir -p "$DIST_DIR"
 
@@ -41,6 +43,8 @@ if [[ -d "$HELPER_SOURCE_DIR" ]]; then
   cp "$HELPER_SOURCE_DIR"/*.mjs "$HELPER_DEST_DIR/"
   chmod +x "$HELPER_DEST_DIR/word-fixer-helper.mjs"
 fi
+rm -rf "$DEFAULTS_DEST_DIR"
+ditto "$DEFAULTS_SOURCE_DIR" "$DEFAULTS_DEST_DIR"
 chmod +x "$MACOS_DIR/$EXECUTABLE_NAME"
 
 # Give local builds a stable designated requirement so macOS Accessibility

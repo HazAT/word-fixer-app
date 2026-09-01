@@ -9,7 +9,7 @@ Word Fixer reviews selected text with Pi and offers two pasteable revisions plus
 - **macOS 14+** — the existing menu bar app, using Accessibility (AX) for capture and replacement with clipboard copy/paste only as a fallback.
 - **Omarchy** — a native Quickshell overlay in the existing `omarchy-shell` process, using Hyprland and the Wayland clipboard for capture and safe paste-back.
 
-The macOS AX frontend is unchanged by the Omarchy work. The Linux implementation does not replace or weaken its AX-first behavior.
+Both frontends use the same locked helper runtime and review contract. The Linux implementation does not replace or weaken macOS's AX-first behavior.
 
 ## Review behavior
 
@@ -48,11 +48,13 @@ The fallback is less reliable than AX and is not the preferred architecture.
 
 - macOS 14+
 - Swift 5.10+
-- `pi` installed
+- Node.js 22.19 or newer and npm
+- `pi` installed with canonical authentication ready for `openai-codex/gpt-5.4-mini`
 - Accessibility permission for the installed app, or for the terminal when using `swift run`
 
 ```bash
 swift build
+make runtime
 swift run
 # or
 make build
@@ -65,6 +67,8 @@ Install for the current user and open the stable app path:
 make install
 open "$HOME/Applications/Word Fixer.app"
 ```
+
+The installer verifies the dedicated model and canonical authentication, installs the locked SDK under app data, records a dedicated Node link, and seeds only missing prompts and settings before launch. Existing prompt customization is preserved.
 
 Other packaging targets:
 
@@ -87,10 +91,10 @@ The existing Swift frontend uses:
 Its fields are:
 
 - `shortcutKey` and `shortcutModifiers` — global hotkey.
-- `piBinaryPath` — installed Pi location used by the existing macOS bootstrap.
-- `debugLogging` — writes verbose logs under `~/.config/word-fixer/` when enabled.
+- `nodeBinaryPath` — dedicated Node runtime link created by the installer.
+- `debugLogging` — writes verbose logs under app data when enabled.
 
-The Swift bootstrap seeds missing `SYSTEM.md`, `NATURAL.md`, and `FEEDBACK.md` from its existing Swift defaults. On this Linux feature branch, migration of the Swift bootstrap/packaging to `shared/prompts/` and the app-owned SDK layout is deliberately deferred, as is Swift build/test verification. No macOS source was changed for the Omarchy frontend.
+The packaged `shared/prompts/` and `shared/settings.json` defaults are seeded only when their destination files are missing. The helper state, locked SDK, model store, and debug log use `~/.local/share/word-fixer/` (or `$XDG_DATA_HOME/word-fixer/`), matching Omarchy.
 
 ## Omarchy
 
@@ -203,9 +207,9 @@ Important clipboard behavior on Omarchy:
 - Previous rich clipboard MIME data is **not** restored, even after cancellation or error.
 - Transport and paste are plain text; rich clipboard preservation is unsupported.
 
-## Omarchy configuration and state
+## Configuration and state
 
-Default locations respect `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, and `XDG_RUNTIME_DIR`:
+Both frontends respect `XDG_CONFIG_HOME` and `XDG_DATA_HOME`; Omarchy also uses `XDG_RUNTIME_DIR` for request IPC:
 
 ```text
 ~/.config/word-fixer/
@@ -247,7 +251,7 @@ The model is a product invariant, not a user-facing model picker. The helper als
 ## Architecture
 
 ```text
-shared/prompts/                 # versioned defaults used by Linux bootstrap
+shared/                         # cross-platform prompt and settings defaults
 helper/
 ├── helper-lib.mjs              # config, app SDK, sessions, validation, timeouts
 ├── word-fixer-helper.mjs       # bounded loopback HTTP review service
@@ -255,8 +259,9 @@ helper/
 ├── package.json
 └── package-lock.json
 
-Sources/WordFixer/              # unchanged macOS AX/AppKit/SwiftUI frontend
-Tests/WordFixerTests/           # macOS diff tests
+Sources/WordFixer/              # macOS AX/AppKit/SwiftUI frontend and shared paths
+Tests/WordFixerTests/           # macOS diff and configuration tests
+scripts/bootstrap-runtime.sh    # macOS locked runtime bootstrap
 
 linux/
 ├── bin/word-fixer              # single-instance Wayland client
@@ -273,23 +278,25 @@ The helper listens only on `127.0.0.1`, advertises a versioned health record in 
 
 ## Contributor verification
 
-On this Linux branch, run:
+Run the shared and Linux checks:
 
 ```bash
 node --test helper/helper-lib.test.mjs linux/test/*.test.mjs
 for file in helper/helper-lib.mjs helper/sdk-loader.mjs helper/word-fixer-helper.mjs linux/bin/word-fixer linux/lib/*.mjs; do node --check "$file"; done
-bash -n linux/install
+bash -n linux/install scripts/bootstrap-runtime.sh scripts/install.sh scripts/package-app.sh
 luac -p linux/hypr/word-fixer.lua
 omarchy plugin validate "$PWD"
 ```
 
-For live Omarchy installation or binding changes, also run `./linux/install --check`, inspect the keybinding, reload Hyprland, require empty `hyprctl configerrors`, and run the managed machine-config doctor where applicable.
-
-Swift/macOS migration and verification are not required on this Linux branch and must not be approximated on Linux. A later macOS-capable change that touches Swift must run:
+On macOS, also run:
 
 ```bash
+swift build
 swift test
+make package
 ```
+
+Install and launch the stable `~/Applications/Word Fixer.app` path, verify helper prewarm in the app-data debug log, and perform a real review when canonical authentication is available. For live Omarchy installation or binding changes, also run `./linux/install --check`, inspect the keybinding, reload Hyprland, require empty `hyprctl configerrors`, and run the managed machine-config doctor where applicable.
 
 ## Known limitations
 

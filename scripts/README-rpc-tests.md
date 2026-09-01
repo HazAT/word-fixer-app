@@ -4,7 +4,7 @@ These scripts are for isolating Pi transport behavior outside the macOS app.
 
 ## Requirements
 
-- Node available on PATH
+- Node and `pi` available on PATH
 - `~/.config/word-fixer/config.json` configured
 - `~/.config/word-fixer/.pi/` contains `settings.json` and `SYSTEM.md`
 - Pi is authenticated through `~/.pi/agent/auth.json`
@@ -30,7 +30,7 @@ Tests:
 - `new_session`
 - second prompt
 
-This is the closest reproduction of the app's intended persistent RPC model.
+This isolates Pi's RPC reset behavior; the app itself uses fresh in-memory SDK sessions.
 
 ### 3. Direct SDK bindings
 
@@ -38,10 +38,7 @@ This is the closest reproduction of the app's intended persistent RPC model.
 node scripts/test-pi-sdk-once.mjs "helo wrld"
 ```
 
-Uses direct Node bindings from the Pi SDK instead of the CLI RPC mode.
-This answers the question: **yes, we can use direct Node bindings**.
-
-The script resolves the SDK path from the configured `piBinaryPath`, so you do not need to install the Pi SDK package in this project.
+Uses the locked app-owned Pi SDK instead of the CLI RPC mode. Run the platform installer first so the SDK exists under app data.
 
 ### 4. Helper HTTP transport
 
@@ -49,7 +46,7 @@ The script resolves the SDK path from the configured `piBinaryPath`, so you do n
 node scripts/test-word-fixer-helper.mjs "helo wrld"
 ```
 
-Starts the local helper, waits for `~/.config/word-fixer/helper.json`, then exercises:
+Starts the local helper, waits for `~/.local/share/word-fixer/helper.json`, then exercises:
 - `POST /health`
-- `POST /fix`
+- `POST /review`
 - `POST /shutdown`

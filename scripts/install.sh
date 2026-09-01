@@ -3,93 +3,19 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PACKAGE_SCRIPT="$ROOT/scripts/package-app.sh"
+RUNTIME_SCRIPT="$ROOT/scripts/bootstrap-runtime.sh"
 APP_PATH="$($PACKAGE_SCRIPT | tail -n 1)"
 TARGET_DIR="$HOME/Applications"
 OPEN_AFTER_INSTALL=0
 
-resolve_user_home() {
+bootstrap_runtime() {
   if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
-    dscl . -read "/Users/${SUDO_USER}" NFSHomeDirectory | awk '{print $2}'
+    local user_home
+    user_home="$(dscl . -read "/Users/$SUDO_USER" NFSHomeDirectory | awk '{print $2}')"
+    sudo -u "$SUDO_USER" env -u XDG_CONFIG_HOME -u XDG_DATA_HOME HOME="$user_home" PATH="$PATH" "$RUNTIME_SCRIPT"
     return
   fi
-
-  printf '%s\n' "$HOME"
-}
-
-bootstrap_config() {
-  local user_home pi_path node_path config_dir config_file
-  user_home="$(resolve_user_home)"
-  config_dir="$user_home/.config/word-fixer"
-  config_file="$config_dir/config.json"
-  node_path="$(command -v node || true)"
-
-  if [[ -z "$node_path" ]]; then
-    echo "Warning: node not found; leaving $config_file unchanged" >&2
-    return
-  fi
-
-  pi_path="$($node_path - <<'EOF'
-const fs = require('fs');
-const path = require('path');
-const packageName = '@earendil-works/pi-coding-agent';
-for (const directory of (process.env.PATH ?? '').split(path.delimiter)) {
-  const candidate = path.join(directory, 'pi');
-  try {
-    fs.accessSync(path.join(directory, 'node'), fs.constants.X_OK);
-    const realPath = fs.realpathSync(candidate);
-    let packageDirectory = path.dirname(realPath);
-    while (true) {
-      try {
-        const packageJson = JSON.parse(fs.readFileSync(path.join(packageDirectory, 'package.json'), 'utf8'));
-        if (packageJson.name === packageName) {
-          process.stdout.write(candidate);
-          process.exit(0);
-        }
-      } catch {}
-      const parent = path.dirname(packageDirectory);
-      if (parent === packageDirectory) break;
-      packageDirectory = parent;
-    }
-  } catch {}
-}
-EOF
-)"
-
-  if [[ -z "$pi_path" ]]; then
-    echo "Warning: a Pi SDK installation was not found on PATH; leaving $config_file unchanged" >&2
-    return
-  fi
-
-  node_path="$(dirname "$pi_path")/node"
-  if [[ ! -x "$node_path" ]]; then
-    echo "Warning: node was not found next to $pi_path; leaving $config_file unchanged" >&2
-    return
-  fi
-
-  mkdir -p "$config_dir"
-
-  if [[ ! -f "$config_file" ]]; then
-    cat > "$config_file" <<EOF
-{
-  "shortcutKey": "c",
-  "shortcutModifiers": ["command", "shift"],
-  "piBinaryPath": "$pi_path",
-  "debugLogging": true
-}
-EOF
-    echo "Bootstrapped $config_file"
-    return
-  fi
-
-  "$node_path" - <<'EOF' "$config_file" "$pi_path"
-const fs = require('fs');
-const [configFile, piPath] = process.argv.slice(2);
-const config = JSON.parse(fs.readFileSync(configFile, 'utf8'));
-config.piBinaryPath = piPath;
-fs.writeFileSync(configFile, `${JSON.stringify(config, null, 2)}\n`);
-EOF
-
-  echo "Updated piBinaryPath in $config_file -> $pi_path"
+  "$RUNTIME_SCRIPT"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -131,9 +57,9 @@ fi
 
 rm -rf "$TARGET_APP"
 ditto "$APP_PATH" "$TARGET_APP"
+bootstrap_runtime
 
 echo "Installed to $TARGET_APP"
-bootstrap_config
 
 if [[ "$OPEN_AFTER_INSTALL" -eq 1 ]]; then
   open "$TARGET_APP"

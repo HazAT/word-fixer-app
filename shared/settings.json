@@ -1,0 +1,8 @@
+{
+  "defaultProvider": "openai-codex",
+  "defaultModel": "gpt-5.4-mini",
+  "defaultThinkingLevel": "off",
+  "modelThinkingLevels": {
+    "openai-codex/gpt-5.4-mini": "off"
+  }
+}

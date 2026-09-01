@@ -177,7 +177,7 @@ export async function resolvePiSdkModuleUrl(dataDir = resolveDataDir()) {
     return pathToFileURL(await fs.realpath(path.join(sdkDirectory, 'sdk-loader.mjs')));
   } catch (error) {
     if (error?.code === 'ENOENT') {
-      throw new Error(`Word Fixer SDK is not installed at ${sdkDirectory}. Run word-fixer-setup.`, { cause: error });
+      throw new Error(`Word Fixer SDK is not installed at ${sdkDirectory}. Run the Word Fixer installer again.`, { cause: error });
     }
     throw error;
   }

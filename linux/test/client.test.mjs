@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import process from 'node:process';
 import test from 'node:test';
 import { once } from 'node:events';
 import { execFile } from 'node:child_process';
@@ -391,12 +392,19 @@ test('helper client reuses a healthy API-v3 helper and preserves request text in
   assert.equal(requests[1].body.text, text);
 });
 
-test('runCommand can ignore inherited daemon output pipes', async (t) => {
-  const directory = await temporaryRuntime(t);
-  const command = path.join(directory, 'forking-command');
-  await fs.writeFile(command, '#!/bin/sh\ncat >/dev/null\n(sleep 1) &\n', { mode: 0o700 });
+test('runCommand can ignore inherited daemon output pipes', async () => {
+  const forkingCommand = `
+    const { spawn } = require('node:child_process');
+    const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 1000)'], {
+      detached: true,
+      stdio: ['ignore', process.stdout, process.stderr],
+    });
+    child.unref();
+    process.stdin.resume();
+    process.stdin.on('end', () => process.exit(0));
+  `;
 
-  await runCommand(command, [], {
+  await runCommand(process.execPath, ['-e', forkingCommand], {
     input: Buffer.from('clipboard text'),
     timeoutMs: 250,
     captureOutput: false,

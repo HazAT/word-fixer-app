@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import process from 'node:process';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -303,9 +304,12 @@ test('an unavailable locked package install fails clearly without a partial SDK'
 test('missing command and unavailable dedicated model fail before installation mutations', async (t) => {
   const emptyHome = await fs.mkdtemp(path.join(os.tmpdir(), 'word-fixer-missing-prerequisite-'));
   t.after(() => fs.rm(emptyHome, { recursive: true, force: true }));
+  const prerequisiteBin = path.join(emptyHome, 'bin');
+  await fs.mkdir(prerequisiteBin);
+  await fs.symlink(process.execPath, path.join(prerequisiteBin, 'node'));
   const missingCommand = spawnSync(installer, [], {
     cwd: repositoryRoot,
-    env: { HOME: emptyHome, PATH: '/usr/bin:/bin' },
+    env: { HOME: emptyHome, PATH: `${prerequisiteBin}:/usr/bin:/bin` },
     encoding: 'utf8',
   });
   assert.notEqual(missingCommand.status, 0);

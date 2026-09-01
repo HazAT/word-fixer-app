@@ -144,7 +144,7 @@ test('reports a clear setup error when the app-owned SDK is missing', async (t) 
   const dataDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'word-fixer-pi-sdk-missing-'));
   t.after(() => fs.rm(dataDirectory, { recursive: true, force: true }));
 
-  await assert.rejects(resolvePiSdkModuleUrl(dataDirectory), /Run word-fixer-setup/);
+  await assert.rejects(resolvePiSdkModuleUrl(dataDirectory), /Run the Word Fixer installer again/);
 });
 
 test('round-trips mixed line breaks and intentional blank lines exactly', () => {

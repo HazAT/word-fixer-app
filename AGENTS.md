@@ -15,7 +15,7 @@ Every successful review produces `Light edit`, `Natural English`, and `Takeaway`
 
 Use Accessibility APIs as the primary macOS capture/apply path. Clipboard copy/paste is fallback only. Do not redesign macOS toward clipboard-first behavior because Linux uses the Wayland clipboard.
 
-The Omarchy implementation was added without changing Swift/macOS source. On branch `feat/omarchy-word-fixer`, Swift migration to `shared/prompts/` and the app-owned SDK layout, plus Swift build/test verification, is explicitly deferred to a later macOS-capable change. It is not required for this Linux branch. Do not modify, build, or test Swift merely to complete Linux work.
+Both frontends use the shared prompts, app-owned SDK layout, XDG-aware config/data paths, and versioned helper API. macOS packaging must seed the same locked runtime without changing its AX-first capture and apply behavior.
 
 ### Omarchy paste must be exact-target safe
 
@@ -62,7 +62,7 @@ The locked `@earendil-works/pi-coding-agent` SDK belongs under `~/.local/share/w
 ${XDG_RUNTIME_DIR:-/tmp}/word-fixer/
 ```
 
-Linux install/bootstrap seeds only missing prompts and settings. Never overwrite user prompt customization. Runtime helper state, logs, sockets, locks, requests, installed dependencies, and credentials must remain untracked.
+Platform installers seed only missing prompts and settings. Never overwrite user prompt customization. Runtime helper state, logs, sockets, locks, requests, installed dependencies, and credentials must remain untracked.
 
 ## Key files
 
@@ -71,7 +71,7 @@ Linux install/bootstrap seeds only missing prompts and settings. Never overwrite
 - `helper/helper-lib.mjs` — config paths, SDK services, model/session invariants, validation, cancellation, and timeout.
 - `helper/word-fixer-helper.mjs` — versioned loopback health/review service.
 - `helper/sdk-loader.mjs`, `helper/package.json`, `helper/package-lock.json` — locked app-owned SDK.
-- `shared/prompts/` — versioned Linux bootstrap defaults.
+- `shared/prompts/`, `shared/settings.json` — versioned cross-platform bootstrap defaults.
 
 ### macOS
 
@@ -81,7 +81,8 @@ Linux install/bootstrap seeds only missing prompts and settings. Never overwrite
 - `Sources/WordFixer/PiInvoker.swift`, `PiHelperClient.swift` — helper transport/supervision.
 - `Sources/WordFixer/DiffEngine.swift` — inline diff.
 - `Sources/WordFixer/OverlayPanel.swift`, `OverlayView.swift` — AppKit/SwiftUI overlay.
-- `Sources/WordFixer/ConfigManager.swift` — existing macOS config and prompt bootstrap.
+- `Sources/WordFixer/ConfigManager.swift` — shared config/data paths and non-destructive default bootstrap.
+- `scripts/bootstrap-runtime.sh` — locked macOS SDK, Node link, prompt/settings, model, and auth bootstrap.
 
 ### Omarchy/Linux
 
@@ -135,15 +136,15 @@ Keep product implementation in this repository. Machine config may track only th
 
 ### macOS verification
 
-For a later macOS-capable change that touches Swift or macOS packaging:
+For changes that touch Swift, the shared helper, or macOS packaging:
 
 ```bash
 swift build
 swift test
-# or use the corresponding make targets
+make package
 ```
 
-`make test` includes Swift and helper tests and is therefore macOS-only. Swift/macOS testing was intentionally not run and is not an acceptance requirement for the current Linux branch. When testing Accessibility permissions, use one stable installed app path rather than switching among `swift run`, `dist/...`, and installed copies.
+Install and launch `~/Applications/Word Fixer.app`, verify helper prewarm from `~/.local/share/word-fixer/debug.log`, and run one real review when authentication is available. `make test` includes Swift and helper tests and is therefore macOS-only. When testing Accessibility permissions, use one stable installed app path rather than switching among `swift run`, `dist/...`, and installed copies.
 
 ## Supported scope
 

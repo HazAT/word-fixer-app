@@ -8,7 +8,7 @@ enum PiError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .binaryNotFound(let path):
-            return "Pi binary not found at: \(path). Check config.json."
+            return "Node runtime not found at: \(path). Reinstall Word Fixer."
         case .executionFailed(let stderr):
             return "Pi error: \(stderr)"
         case .timeout:
