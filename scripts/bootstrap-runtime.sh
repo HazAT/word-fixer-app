@@ -79,7 +79,7 @@ sdk_version="$($NODE_COMMAND -e '
 
 "$NODE_COMMAND" -e '
   const lock = require(process.argv[1]);
-  const actual = lock.packages?.['node_modules/' + process.argv[2]]?.version;
+  const actual = lock.packages?.["node_modules/" + process.argv[2]]?.version;
   if (actual !== process.argv[3]) process.exit(1);
 ' "$SDK_LOCKFILE" "$SDK_PACKAGE" "$sdk_version" || fail "$SDK_LOCKFILE does not lock $SDK_PACKAGE at $sdk_version."
 
