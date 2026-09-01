@@ -40,13 +40,19 @@ struct OverlayView: View {
                             .foregroundStyle(.secondary)
                     }
 
-                    VStack(alignment: .leading, spacing: 10) {
-                        ForEach(Array(options.enumerated()), id: \.offset) { index, option in
-                            correctionCard(option, isSelected: index == selectedIndex)
-                        }
-                    }
+                    ScrollView(.vertical) {
+                        VStack(alignment: .leading, spacing: 16) {
+                            VStack(alignment: .leading, spacing: 10) {
+                                ForEach(Array(options.enumerated()), id: \.offset) { index, option in
+                                    correctionCard(option, isSelected: index == selectedIndex)
+                                }
+                            }
 
-                    feedbackCard(feedback)
+                            feedbackCard(feedback)
+                        }
+                        .padding(.trailing, 6)
+                    }
+                    .scrollIndicators(.visible)
 
                     VStack(alignment: .trailing, spacing: 2) {
                         Text("⇥ Switch · ↩ Paste selected · Esc Dismiss")

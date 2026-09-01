@@ -57,11 +57,12 @@ final class OverlayPanel: NSPanel {
         // Size to fit content
         hostingView?.layout()
         let fittingSize = hostingView?.fittingSize ?? NSSize(width: 580, height: 200)
-        let maximumHeight = min(NSScreen.main?.visibleFrame.height ?? 680, 680) - 40
+        let screen = NSScreen.main ?? NSScreen.screens.first
+        let maximumHeight = (screen?.visibleFrame.height ?? 800) * 0.8
         let panelSize = NSSize(width: 580, height: min(fittingSize.height, maximumHeight))
 
         // Center on screen
-        if let screen = NSScreen.main {
+        if let screen {
             let screenFrame = screen.visibleFrame
             let x = screenFrame.midX - panelSize.width / 2
             let y = screenFrame.midY - panelSize.height / 2
