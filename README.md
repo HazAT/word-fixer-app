@@ -139,7 +139,7 @@ The product installer enables the overlay and client but does not edit personal 
 hl.unbind("SUPER + SHIFT + C")
 o.bind("SUPER + SHIFT + C", "Word Fixer", function()
   dofile((os.getenv("HOME") or "") .. "/.config/omarchy/plugins/hazat.word-fixer/linux/hypr/word-fixer.lua").capture()
-end)
+end, { release = true })
 ```
 
 Reload and inspect the live binding:
@@ -157,7 +157,7 @@ The result should identify **SUPER SHIFT + C** as **Word Fixer**, not HEY Calend
 1. Select non-empty text in the source application.
 2. Press **SUPER+SHIFT+C**.
 3. Word Fixer records the source window address, PID, class, and terminal classification before opening the overlay.
-4. It clears the old clipboard, sends the appropriate copy chord, and reads selected plain text with `wl-paste`.
+4. After the triggering key callback has returned, the external client clears the old clipboard, verifies the source, sends the appropriate copy chord, and reads selected plain text with `wl-paste`.
 5. A centered, theme-aware loading overlay opens while the shared helper performs the three concurrent reviews.
 6. Review **Light edit**, **Natural English**, and the bottom **Takeaway** card.
 
@@ -252,7 +252,7 @@ Tests/WordFixerTests/           # macOS diff tests
 
 linux/
 ├── bin/word-fixer              # single-instance Wayland client
-├── hypr/word-fixer.lua         # capture callback and normal/terminal copy chord
+├── hypr/word-fixer.lua         # target capture and deferred client launch callback
 ├── install                     # idempotent installer and --check
 ├── lib/                        # protocol, diff, helper, target, runtime primitives
 ├── omarchy/                    # Quickshell overlay and presentation model

@@ -249,6 +249,35 @@ export class LinuxSystem {
     return parseJsonBuffer(result.stdout, 'hyprctl activewindow');
   }
 
+  async clearClipboard({ signal } = {}) {
+    await this.command(
+      'wl-copy',
+      ['--clear'],
+      { signal, timeoutMs: 2_000, maximumOutputBytes: 64 * 1024 },
+    );
+  }
+
+  async copy(sourceWindow, target, { signal } = {}) {
+    const [down, up] = clipboardKeyEvents('copy', sourceWindow);
+    const current = await this.getActiveWindow({ signal });
+    if (!targetMatches(target, current)) {
+      throw new Error('Refusing to copy because the source window lost focus.');
+    }
+    await this.command('hyprctl', [
+      'dispatch',
+      `hl.dsp.send_key_state({ mods = '${down.mods}', key = '${down.key}', state = '${down.state}' })`,
+    ], { signal });
+    try {
+      await delay(50, signal);
+    } finally {
+      await this.command('hyprctl', [
+        'dispatch',
+        `hl.dsp.send_key_state({ mods = '${up.mods}', key = '${up.key}', state = '${up.state}' })`,
+      ]).catch(() => {});
+    }
+    await delay(150, signal);
+  }
+
   async readClipboardText({ signal } = {}) {
     const result = await this.command(
       'wl-paste',

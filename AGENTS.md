@@ -32,6 +32,8 @@ Never paste into a changed or unverified window. On refusal, keep the correction
 
 Normal windows use Ctrl+C/Ctrl+V. Windows tagged `terminal` use Ctrl+Insert/Shift+Insert. Omarchy capture clears the previous clipboard; rich MIME restoration is intentionally unsupported.
 
+Never clear the clipboard or inject copy from inside the triggering Hyprland Lua key callback. The callback captures source metadata and returns; the external single-instance client then verifies the target, clears the clipboard, and dispatches copy. Bind on key release so trigger state is settled before client launch.
+
 ### Pi runtime is fixed and isolated
 
 Every task session must use:
@@ -86,7 +88,7 @@ Linux install/bootstrap seeds only missing prompts and settings. Never overwrite
 - `manifest.json` — schema-v1 `hazat.word-fixer` overlay plugin.
 - `linux/install` — idempotent install and non-destructive `--check`.
 - `linux/bin/word-fixer` — single-instance client entry point.
-- `linux/hypr/word-fixer.lua` — source capture and normal/terminal copy dispatch.
+- `linux/hypr/word-fixer.lua` — source capture and deferred external-client launch only; no clipboard or input injection.
 - `linux/lib/orchestrator.mjs` — loading/review/error flow and safe paste-back.
 - `linux/lib/system.mjs` — process, helper, clipboard, shell, focus, and notification integration.
 - `linux/lib/runtime.mjs` — restrictive request IPC, lock, timeout, and cleanup.
@@ -116,7 +118,7 @@ The product installer does not edit personal bindings. Managed config must expli
 hl.unbind("SUPER + SHIFT + C")
 o.bind("SUPER + SHIFT + C", "Word Fixer", function()
   dofile((os.getenv("HOME") or "") .. "/.config/omarchy/plugins/hazat.word-fixer/linux/hypr/word-fixer.lua").capture()
-end)
+end, { release = true })
 ```
 
 Verify with:

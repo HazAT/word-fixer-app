@@ -59,6 +59,8 @@ export async function runReviewFlow({
       throw new Error('The source window type changed before Word Fixer captured the selection.');
     }
 
+    await system.clearClipboard({ signal });
+    await system.copy(sourceWindow, sourceTarget, { signal });
     const selectedText = await system.readClipboardText({ signal });
     const request = createReviewRequest({ requestId: runtime.requestId, text: selectedText });
 

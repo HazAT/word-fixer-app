@@ -68,10 +68,24 @@ class StubSystem {
     this.notifications = [];
     this.hideCount = 0;
     this.reviewInputs = [];
+    this.clipboardClearCount = 0;
+    this.copies = [];
+    this.captureEvents = [];
   }
 
   async getActiveWindow() { return this.activeWindow; }
-  async readClipboardText() { return this.text; }
+  async clearClipboard() {
+    this.clipboardClearCount += 1;
+    this.captureEvents.push('clear');
+  }
+  async copy(window) {
+    this.copies.push(selectClipboardCommand('copy', window));
+    this.captureEvents.push('copy');
+  }
+  async readClipboardText() {
+    this.captureEvents.push('read');
+    return this.text;
+  }
   async review(text) {
     this.reviewInputs.push(text);
     if (this.reviewValue instanceof Error) throw this.reviewValue;
@@ -139,6 +153,9 @@ test('stub helper runs loading and review through light-edit acceptance', async 
   assert.equal(result.status, 'accepted');
   assert.equal(result.acceptedText, 'This is wrong.');
   assert.deepEqual(system.overlayPayloads.map(({ state }) => state), ['loading', 'review']);
+  assert.equal(system.clipboardClearCount, 1);
+  assert.deepEqual(system.copies, [{ mods: 'CTRL', key: 'C' }]);
+  assert.deepEqual(system.captureEvents, ['clear', 'copy', 'read']);
   assert.deepEqual(system.clipboardWrites, ['This is wrong.']);
   assert.deepEqual(system.pastes, [{ mods: 'CTRL', key: 'V' }]);
   assert.equal(system.locators.every((value) => !JSON.stringify(value).includes(system.text)), true);
@@ -152,6 +169,7 @@ test('stub helper selects Natural English and terminal paste chord', async (t) =
   const result = await execute(t, system);
 
   assert.equal(result.status, 'accepted');
+  assert.deepEqual(system.copies, [{ mods: 'CTRL', key: 'Insert' }]);
   assert.deepEqual(system.clipboardWrites, ['This wording is incorrect.']);
   assert.deepEqual(system.pastes, [{ mods: 'SHIFT', key: 'Insert' }]);
 });
@@ -185,6 +203,8 @@ test('empty capture or changed source identity never opens an overlay or pastes'
   const changedSystem = new StubSystem();
   await assert.rejects(() => execute(t, changedSystem, { sourcePid: 9999 }), /source window changed/);
   assert.deepEqual(changedSystem.overlayPayloads, []);
+  assert.equal(changedSystem.clipboardClearCount, 0);
+  assert.deepEqual(changedSystem.copies, []);
   assert.deepEqual(changedSystem.pastes, []);
 });
 
@@ -282,6 +302,8 @@ test('request runtime rejects duplicates, uses restrictive modes, and releases t
     system: duplicateSystem,
     acquireRuntime: () => acquireRequestRuntime({ runtimeDirectory }),
   }), DuplicateInvocationError);
+  assert.equal(duplicateSystem.clipboardClearCount, 0);
+  assert.deepEqual(duplicateSystem.copies, []);
   assert.deepEqual(duplicateSystem.clipboardWrites, []);
   assert.deepEqual(duplicateSystem.pastes, []);
   await first.cleanup();
@@ -346,7 +368,7 @@ test('helper client reuses a healthy API-v3 helper and preserves request text in
   assert.equal(requests[1].body.text, text);
 });
 
-test('Linux clipboard transport uses plain-text wl-paste and stdin-only wl-copy', async () => {
+test('Linux clipboard transport clears capture state, reads plain text, and writes through stdin', async () => {
   const calls = [];
   const text = 'line 1\nUnicode 😀 $(shell) <markup>';
   const command = async (executable, args, options = {}) => {
@@ -357,16 +379,18 @@ test('Linux clipboard transport uses plain-text wl-paste and stdin-only wl-copy'
     };
   };
   const system = new LinuxSystem({ command });
+  await system.clearClipboard();
   assert.equal(await system.readClipboardText(), text);
   await system.writeClipboardText(text);
 
-  assert.deepEqual(calls[0].args, ['--type', 'text', '--no-newline']);
-  assert.deepEqual(calls[1].args, ['--type', 'text/plain;charset=utf-8']);
-  assert.equal(calls[1].options.input.toString('utf8'), text);
+  assert.deepEqual(calls[0].args, ['--clear']);
+  assert.deepEqual(calls[1].args, ['--type', 'text', '--no-newline']);
+  assert.deepEqual(calls[2].args, ['--type', 'text/plain;charset=utf-8']);
+  assert.equal(calls[2].options.input.toString('utf8'), text);
   assert.equal(calls.some(({ args }) => args.includes(text)), false);
 });
 
-test('Linux paste dispatch verifies the exact target and emits installed normal and terminal chords', async () => {
+test('Linux copy and paste dispatch verify the exact target and emit installed chords', async () => {
   const mismatchedCalls = [];
   const mismatchedSystem = new LinuxSystem({
     command: async (executable, args) => {
@@ -377,11 +401,19 @@ test('Linux paste dispatch verifies the exact target and emits installed normal 
       };
     },
   });
-  await assert.rejects(() => mismatchedSystem.paste(normalWindow, {
+  const mismatchedTarget = {
     address: normalWindow.address.toLowerCase(),
     pid: normalWindow.pid,
     initialClass: normalWindow.initialClass,
-  }), /Refusing to paste/);
+  };
+  await assert.rejects(
+    () => mismatchedSystem.copy(normalWindow, mismatchedTarget),
+    /Refusing to copy/,
+  );
+  await assert.rejects(
+    () => mismatchedSystem.paste(normalWindow, mismatchedTarget),
+    /Refusing to paste/,
+  );
   assert.equal(mismatchedCalls.some(({ args }) => args[0] === 'dispatch'), false);
 
   for (const source of [normalWindow, terminalWindow]) {
@@ -392,29 +424,30 @@ test('Linux paste dispatch verifies the exact target and emits installed normal 
       return { stdout: Buffer.alloc(0), stderr: '' };
     };
     const system = new LinuxSystem({ command });
-    await system.paste(source, {
+    const target = {
       address: source.address.toLowerCase(),
       pid: source.pid,
       initialClass: source.initialClass,
-    });
+    };
+    await system.copy(source, target);
+    await system.paste(source, target);
     const dispatches = calls.filter(({ args }) => args[0] === 'dispatch');
-    const expected = source === terminalWindow ? ['SHIFT', 'Insert'] : ['CTRL', 'V'];
-    assert.match(dispatches[0].args[1], new RegExp(`mods = '${expected[0]}'.*key = '${expected[1]}'.*state = 'down'`));
-    assert.match(dispatches[1].args[1], new RegExp(`mods = '${expected[0]}'.*key = '${expected[1]}'.*state = 'up'`));
+    const expectedCopy = source === terminalWindow ? ['CTRL', 'Insert'] : ['CTRL', 'C'];
+    const expectedPaste = source === terminalWindow ? ['SHIFT', 'Insert'] : ['CTRL', 'V'];
+    assert.match(dispatches[0].args[1], new RegExp(`mods = '${expectedCopy[0]}'.*key = '${expectedCopy[1]}'.*state = 'down'`));
+    assert.match(dispatches[1].args[1], new RegExp(`mods = '${expectedCopy[0]}'.*key = '${expectedCopy[1]}'.*state = 'up'`));
+    assert.match(dispatches[2].args[1], new RegExp(`mods = '${expectedPaste[0]}'.*key = '${expectedPaste[1]}'.*state = 'down'`));
+    assert.match(dispatches[3].args[1], new RegExp(`mods = '${expectedPaste[0]}'.*key = '${expectedPaste[1]}'.*state = 'up'`));
   }
 });
 
-test('product Hyprland callback captures target/type, clears stale clipboard, and mirrors Omarchy key-state copy', async () => {
+test('product Hyprland callback captures target/type without injecting input in the key handler', async () => {
   const lua = await fs.readFile(path.resolve('linux/hypr/word-fixer.lua'), 'utf8');
-  assert.ok(lua.indexOf('local source_address') < lua.indexOf('if not clear_clipboard()'));
-  assert.ok(lua.indexOf('local source_pid') < lua.indexOf('if not clear_clipboard()'));
-  assert.ok(lua.indexOf('local source_terminal') < lua.indexOf('if not clear_clipboard()'));
-  assert.match(lua, /wl-copy --clear/);
-  assert.match(lua, /state = "down"/);
-  assert.match(lua, /state = "up"/);
-  assert.match(lua, /source_terminal and "Insert" or "C"/);
+  assert.ok(lua.indexOf('local source_address') < lua.indexOf('hl.timer(function()'));
+  assert.ok(lua.indexOf('local source_pid') < lua.indexOf('hl.timer(function()'));
+  assert.ok(lua.indexOf('local source_terminal') < lua.indexOf('hl.timer(function()'));
   assert.match(lua, /timeout = 150/);
   assert.match(lua, /word-fixer --source-address/);
   assert.match(lua, /--source-pid/);
-  assert.doesNotMatch(lua, /(?:io\.popen|hl\.exec_cmd)\("wl-paste/);
+  assert.doesNotMatch(lua, /wl-copy --clear|io\.popen|hl\.dsp\.send_key_state|hl\.dispatch/);
 });
