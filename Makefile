@@ -1,4 +1,4 @@
-.PHONY: build test run clean icon package install install-system reinstall open
+.PHONY: build test runtime run clean icon package install install-system reinstall open
 
 build:
 	swift build
@@ -7,7 +7,10 @@ test:
 	swift test
 	node --test helper/helper-lib.test.mjs
 
-run:
+runtime:
+	./scripts/bootstrap-runtime.sh
+
+run: runtime
 	swift run
 
 icon:

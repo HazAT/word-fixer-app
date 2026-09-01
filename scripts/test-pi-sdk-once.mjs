@@ -14,13 +14,13 @@ const log = {
 };
 
 console.log(new Date().toISOString(), 'starting direct SDK test');
-console.log(new Date().toISOString(), 'piBinaryPath', config.piBinaryPath);
+console.log(new Date().toISOString(), 'dataDir', config.dataDir);
 console.log(new Date().toISOString(), 'piDir', config.piDir);
 console.log(new Date().toISOString(), 'prompt', JSON.stringify(prompt));
 
 const services = await loadPiServices({
   piDir: config.piDir,
-  piBinaryPath: config.piBinaryPath,
+  dataDir: config.dataDir,
   cwd: process.cwd(),
   log,
 });

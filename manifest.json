@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "hazat.word-fixer",
+  "name": "Word Fixer",
+  "version": "1.0.0",
+  "author": "HazAT",
+  "description": "Review two text corrections and a concise takeaway in a native Omarchy overlay",
+  "kinds": [
+    "overlay",
+    "bar-widget"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "overlay": "linux/omarchy/WordFixer.qml",
+    "barWidget": "Status.qml"
+  },
+  "barWidget": {
+    "displayName": "Word Fixer",
+    "description": "Shows that Word Fixer is ready and highlights active reviews.",
+    "category": "Writing",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}

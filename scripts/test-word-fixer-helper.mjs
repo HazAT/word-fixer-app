@@ -3,14 +3,15 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { once } from 'node:events';
 import { spawn } from 'node:child_process';
-import { loadWordFixerConfig, parseArgs } from './pi-test-common.mjs';
+import { loadWordFixerConfig } from '../helper/helper-lib.mjs';
+import { parseArgs } from './pi-test-common.mjs';
 
 const { positional } = parseArgs(process.argv.slice(2));
 const prompt = positional[0] ?? 'helo wrld';
-const { configDir, piBinaryPath } = await loadWordFixerConfig();
-const nodePath = path.join(path.dirname(piBinaryPath), 'node');
+const { configDir, dataDir, nodeBinaryPath } = await loadWordFixerConfig();
+const nodePath = nodeBinaryPath;
 const helperScript = path.resolve('helper/word-fixer-helper.mjs');
-const helperStatePath = path.join(configDir, 'helper.json');
+const helperStatePath = path.join(dataDir, 'helper.json');
 
 await fs.rm(helperStatePath, { force: true });
 
@@ -19,6 +20,7 @@ const child = spawn(nodePath, [helperScript], {
   env: {
     ...process.env,
     WORD_FIXER_CONFIG_DIR: configDir,
+    WORD_FIXER_DATA_DIR: dataDir,
     WORD_FIXER_DEBUG: '1',
     WORD_FIXER_HELPER_CWD: process.cwd(),
   },

@@ -1,10 +1,89 @@
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const piPackageName = '@earendil-works/pi-coding-agent';
+export const REVIEW_MODEL = Object.freeze({
+  provider: 'openai-codex',
+  id: 'gpt-5.4-mini',
+});
+export const MAX_REVIEW_INPUT_BYTES = 64 * 1024;
+export const MAX_TASK_OUTPUT_BYTES = 256 * 1024;
+export const DEFAULT_REVIEW_TIMEOUT_MS = 30_000;
 
 const lineBreakPattern = /\r\n|\r|\n/g;
+
+export class ReviewInputError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'ReviewInputError';
+    this.code = 'INVALID_REVIEW_INPUT';
+  }
+}
+
+export class ReviewTimeoutError extends Error {
+  constructor(timeoutMs) {
+    super(`Pi review timed out after ${timeoutMs}ms.`);
+    this.name = 'ReviewTimeoutError';
+    this.code = 'REVIEW_TIMEOUT';
+  }
+}
+
+export class ReviewCancelledError extends Error {
+  constructor() {
+    super('Pi review was cancelled.');
+    this.name = 'ReviewCancelledError';
+    this.code = 'REVIEW_CANCELLED';
+  }
+}
+
+function textByteLength(text) {
+  return Buffer.byteLength(text, 'utf8');
+}
+
+export function validateReviewInput(text) {
+  if (typeof text !== 'string' || text.trim().length === 0) {
+    throw new ReviewInputError('Review text must be a non-empty string.');
+  }
+  if (textByteLength(text) > MAX_REVIEW_INPUT_BYTES) {
+    throw new ReviewInputError(`Review text exceeds the ${MAX_REVIEW_INPUT_BYTES}-byte limit.`);
+  }
+  return text;
+}
+
+function validateOutput(name, value) {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new Error(`Pi returned an empty or malformed ${name}.`);
+  }
+  if (textByteLength(value) > MAX_TASK_OUTPUT_BYTES) {
+    throw new Error(`Pi returned ${name} larger than the ${MAX_TASK_OUTPUT_BYTES}-byte limit.`);
+  }
+  return value;
+}
+
+export function validateReviewResponse(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Pi returned a malformed review response.');
+  }
+
+  const correction = validateOutput('correction', value.correction);
+  const natural = validateOutput('natural rewrite', value.natural);
+  const takeaway = validateOutput('takeaway', value.takeaway ?? value.feedback);
+  if (value.feedback !== undefined && value.takeaway !== undefined && value.feedback !== value.takeaway) {
+    throw new Error('Pi returned conflicting takeaway and feedback text.');
+  }
+  if (value.cost !== undefined && (typeof value.cost !== 'number' || !Number.isFinite(value.cost) || value.cost < 0)) {
+    throw new Error('Pi returned a malformed aggregate cost.');
+  }
+
+  return {
+    correction,
+    natural,
+    takeaway,
+    feedback: takeaway,
+    cost: value.cost,
+  };
+}
 
 export function encodeLineBreaks(text) {
   let nonce = 0;
@@ -72,39 +151,35 @@ export function resolveConfigDir() {
   if (process.env.WORD_FIXER_CONFIG_DIR) {
     return process.env.WORD_FIXER_CONFIG_DIR;
   }
-  return path.join(process.env.HOME ?? '', '.config', 'word-fixer');
+  return path.join(process.env.XDG_CONFIG_HOME ?? path.join(process.env.HOME ?? os.homedir(), '.config'), 'word-fixer');
+}
+
+export function resolveDataDir() {
+  if (process.env.WORD_FIXER_DATA_DIR) {
+    return process.env.WORD_FIXER_DATA_DIR;
+  }
+  return path.join(process.env.XDG_DATA_HOME ?? path.join(process.env.HOME ?? os.homedir(), '.local', 'share'), 'word-fixer');
 }
 
 export async function loadWordFixerConfig() {
   const configDir = resolveConfigDir();
   const configPath = path.join(configDir, 'config.json');
   const piDir = path.join(configDir, '.pi');
+  const dataDir = resolveDataDir();
   const raw = await fs.readFile(configPath, 'utf8');
   const config = JSON.parse(raw);
-  return { configDir, configPath, piDir, ...config };
+  return { ...config, configDir, configPath, piDir, dataDir };
 }
 
-export async function resolvePiSdkModuleUrl(piBinaryPath) {
-  const realPiPath = await fs.realpath(piBinaryPath);
-  let directory = path.dirname(realPiPath);
-
-  while (true) {
-    try {
-      const packageJson = JSON.parse(await fs.readFile(path.join(directory, 'package.json'), 'utf8'));
-      if (packageJson.name === piPackageName) {
-        return pathToFileURL(path.join(directory, 'dist', 'index.js'));
-      }
-    } catch (error) {
-      if (error?.code !== 'ENOENT') {
-        throw error;
-      }
+export async function resolvePiSdkModuleUrl(dataDir = resolveDataDir()) {
+  const sdkDirectory = path.join(dataDir, 'sdk');
+  try {
+    return pathToFileURL(await fs.realpath(path.join(sdkDirectory, 'sdk-loader.mjs')));
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      throw new Error(`Word Fixer SDK is not installed at ${sdkDirectory}. Run the Word Fixer installer again.`, { cause: error });
     }
-
-    const parent = path.dirname(directory);
-    if (parent === directory) {
-      throw new Error(`Could not find the ${piPackageName} package containing ${realPiPath}`);
-    }
-    directory = parent;
+    throw error;
   }
 }
 
@@ -135,8 +210,8 @@ export function createLogger({ debugEnabled, logFile }) {
   };
 }
 
-export async function loadPiServices({ piDir, piBinaryPath, cwd, log }) {
-  const sdkUrl = await resolvePiSdkModuleUrl(piBinaryPath);
+export async function loadPiServices({ piDir, dataDir, cwd, log }) {
+  const sdkUrl = await resolvePiSdkModuleUrl(dataDir);
   const sdk = await import(sdkUrl.href);
   const {
     DefaultResourceLoader,
@@ -144,11 +219,11 @@ export async function loadPiServices({ piDir, piBinaryPath, cwd, log }) {
     SessionManager,
     SettingsManager,
     createAgentSession,
-    getAgentDir,
   } = sdk;
 
-  const authPath = path.join(getAgentDir(), 'auth.json');
+  const authPath = path.join(process.env.HOME ?? os.homedir(), '.pi', 'agent', 'auth.json');
   const modelsPath = path.join(piDir, 'models.json');
+  const modelsStorePath = path.join(dataDir, 'models-store.json');
   const promptPaths = {
     correction: path.join(piDir, 'SYSTEM.md'),
     natural: path.join(piDir, 'NATURAL.md'),
@@ -157,10 +232,22 @@ export async function loadPiServices({ piDir, piBinaryPath, cwd, log }) {
   const prompts = Object.fromEntries(await Promise.all(
     Object.entries(promptPaths).map(async ([name, promptPath]) => [name, await fs.readFile(promptPath, 'utf8')]),
   ));
-  const modelRuntime = await ModelRuntime.create({ authPath, modelsPath });
+  const modelRuntime = await ModelRuntime.create({ authPath, modelsPath, modelsStorePath });
+  const model = modelRuntime.getModel(REVIEW_MODEL.provider, REVIEW_MODEL.id);
+  if (!model) {
+    throw new Error(`Required model ${REVIEW_MODEL.provider}/${REVIEW_MODEL.id} is unavailable.`);
+  }
   const settingsManager = SettingsManager.create(cwd, piDir);
 
-  await log.log('services ready', { sdkUrl: sdkUrl.href, piDir, authPath, modelsPath, promptPaths });
+  await log.log('services ready', {
+    sdkUrl: sdkUrl.href,
+    piDir,
+    authPath,
+    modelsPath,
+    modelsStorePath,
+    promptPaths,
+    model: `${REVIEW_MODEL.provider}/${REVIEW_MODEL.id}`,
+  });
 
   return {
     piDir,
@@ -168,6 +255,7 @@ export async function loadPiServices({ piDir, piBinaryPath, cwd, log }) {
     SessionManager,
     createAgentSession,
     modelRuntime,
+    model,
     settingsManager,
     async createResourceLoader(prompt) {
       const resourceLoader = new DefaultResourceLoader({
@@ -183,66 +271,145 @@ export async function loadPiServices({ piDir, piBinaryPath, cwd, log }) {
   };
 }
 
-async function runTextTask({ services, text, cwd, log, systemPrompt, preserveLineBreaks }) {
+function abortReason(signal) {
+  return signal.reason instanceof Error ? signal.reason : new ReviewCancelledError();
+}
+
+function throwIfAborted(signal) {
+  if (signal?.aborted) {
+    throw abortReason(signal);
+  }
+}
+
+function raceWithAbort(promise, signal) {
+  if (!signal) {
+    return promise;
+  }
+  throwIfAborted(signal);
+
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      signal.removeEventListener('abort', onAbort);
+      reject(abortReason(signal));
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
+function isReviewModel(model) {
+  return model?.provider === REVIEW_MODEL.provider && model?.id === REVIEW_MODEL.id;
+}
+
+async function runTextTask({ services, text, cwd, log, systemPrompt, preserveLineBreaks, signal }) {
+  throwIfAborted(signal);
+  if (!isReviewModel(services.model)) {
+    throw new Error(`Required model ${REVIEW_MODEL.provider}/${REVIEW_MODEL.id} is unavailable.`);
+  }
+
   const transport = preserveLineBreaks ? encodeLineBreaks(text) : null;
-  const resourceLoader = await services.createResourceLoader(
+  const resourceLoader = await raceWithAbort(services.createResourceLoader(
     transport ? `${systemPrompt}\n${lineBreakProtocol(transport)}` : systemPrompt,
-  );
-  const { session, modelFallbackMessage } = await services.createAgentSession({
+  ), signal);
+  const creationPromise = services.createAgentSession({
     cwd,
     agentDir: services.piDir,
     sessionManager: services.SessionManager.inMemory(cwd),
     modelRuntime: services.modelRuntime,
+    model: services.model,
     settingsManager: services.settingsManager,
     resourceLoader,
     thinkingLevel: 'off',
     noTools: 'all',
   });
 
-  let assistantText = '';
-  let completedText = '';
-  let completionError;
-  let cost;
-  const unsubscribe = session.subscribe((event) => {
-    if (event.type === 'message_update' && event.assistantMessageEvent?.type === 'text_delta') {
-      assistantText += event.assistantMessageEvent.delta;
-    }
-    if (event.type === 'message_end' && event.message?.role === 'assistant') {
-      completedText = (event.message.content ?? [])
-        .filter((item) => item.type === 'text')
-        .map((item) => item.text)
-        .join('');
-      if (event.message.stopReason === 'error' || event.message.stopReason === 'aborted') {
-        completionError = event.message.errorMessage ?? `Pi stopped with reason: ${event.message.stopReason}`;
-      } else {
-        cost = event.message.usage?.cost?.total;
+  let abandonedSession = false;
+  void creationPromise.then(async ({ session }) => {
+    if (abandonedSession) {
+      try {
+        await session.abort();
+      } finally {
+        session.dispose();
       }
     }
-  });
+  }).catch(() => {});
+
+  let created;
+  try {
+    created = await raceWithAbort(creationPromise, signal);
+  } catch (error) {
+    abandonedSession = true;
+    throw error;
+  }
+  const { session, modelFallbackMessage } = created;
+  let unsubscribe;
+  let promptFinished = false;
 
   try {
     if (modelFallbackMessage) {
-      await log.log('model fallback', modelFallbackMessage);
+      await log.log('model fallback rejected', modelFallbackMessage);
+      throw new Error(`Required model ${REVIEW_MODEL.provider}/${REVIEW_MODEL.id} was not used: ${modelFallbackMessage}`);
     }
-    await session.prompt(transport?.encodedText ?? text);
+    if (!isReviewModel(session.model)) {
+      throw new Error(`Required model ${REVIEW_MODEL.provider}/${REVIEW_MODEL.id} was not selected.`);
+    }
+
+    let assistantText = '';
+    let completedText = '';
+    let completionError;
+    let cost;
+    unsubscribe = session.subscribe((event) => {
+      if (event.type === 'message_update' && event.assistantMessageEvent?.type === 'text_delta') {
+        assistantText += event.assistantMessageEvent.delta;
+      }
+      if (event.type === 'message_end' && event.message?.role === 'assistant') {
+        completedText = (event.message.content ?? [])
+          .filter((item) => item.type === 'text')
+          .map((item) => item.text)
+          .join('');
+        if (event.message.stopReason === 'error' || event.message.stopReason === 'aborted') {
+          completionError = event.message.errorMessage ?? `Pi stopped with reason: ${event.message.stopReason}`;
+        } else {
+          cost = event.message.usage?.cost?.total;
+        }
+      }
+    });
+
+    await raceWithAbort(session.prompt(transport?.encodedText ?? text), signal);
+    promptFinished = true;
     if (completionError) {
       throw new Error(completionError);
     }
     const rawResult = completedText || assistantText;
-    if (!rawResult.trim()) {
-      throw new Error('Pi returned no text.');
+    const resultText = transport ? restoreLineBreaks(rawResult, transport) : rawResult.trim();
+    validateOutput('task output', resultText);
+    if (cost !== undefined && (typeof cost !== 'number' || !Number.isFinite(cost) || cost < 0)) {
+      throw new Error('Pi returned malformed task cost data.');
     }
-    return {
-      text: transport ? restoreLineBreaks(rawResult, transport) : rawResult.trim(),
-      cost,
-    };
+    return { text: resultText, cost };
   } finally {
-    unsubscribe();
-    session.dispose();
+    unsubscribe?.();
+    try {
+      if (!promptFinished || signal?.aborted) {
+        await session.abort();
+      }
+    } finally {
+      session.dispose();
+    }
   }
 }
 
-export async function fixText({ services, text, cwd, log }) {
+export async function fixText({ services, text, cwd, log, signal }) {
+  validateReviewInput(text);
   return runTextTask({
     services,
     text,
@@ -250,44 +417,79 @@ export async function fixText({ services, text, cwd, log }) {
     log,
     systemPrompt: services.prompts.correction,
     preserveLineBreaks: true,
+    signal,
   });
 }
 
-export async function reviewText({ services, text, cwd, log }) {
-  const [correction, natural, feedback] = await Promise.all([
-    runTextTask({
-      services,
-      text,
-      cwd,
-      log,
-      systemPrompt: services.prompts.correction,
-      preserveLineBreaks: true,
-    }),
-    runTextTask({
-      services,
-      text,
-      cwd,
-      log,
-      systemPrompt: services.prompts.natural,
-      preserveLineBreaks: true,
-    }),
-    runTextTask({
-      services,
-      text,
-      cwd,
-      log,
-      systemPrompt: services.prompts.feedback,
-      preserveLineBreaks: false,
-    }),
-  ]);
+export async function reviewText({
+  services,
+  text,
+  cwd,
+  log,
+  signal,
+  timeoutMs = DEFAULT_REVIEW_TIMEOUT_MS,
+}) {
+  validateReviewInput(text);
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
+    throw new ReviewInputError('Review timeout must be a positive integer number of milliseconds.');
+  }
 
-  const costs = [correction.cost, natural.cost, feedback.cost].filter((cost) => cost !== undefined);
-  return {
-    correction: correction.text,
-    natural: natural.text,
-    feedback: feedback.text,
-    cost: costs.length > 0 ? costs.reduce((total, cost) => total + cost, 0) : undefined,
-  };
+  const controller = new AbortController();
+  const cancel = () => controller.abort(new ReviewCancelledError());
+  if (signal?.aborted) {
+    cancel();
+  } else {
+    signal?.addEventListener('abort', cancel, { once: true });
+  }
+  const timeout = setTimeout(() => {
+    controller.abort(new ReviewTimeoutError(timeoutMs));
+  }, timeoutMs);
+
+  const taskOptions = [
+    { name: 'correction', systemPrompt: services.prompts.correction, preserveLineBreaks: true },
+    { name: 'natural', systemPrompt: services.prompts.natural, preserveLineBreaks: true },
+    { name: 'feedback', systemPrompt: services.prompts.feedback, preserveLineBreaks: false },
+  ];
+
+  try {
+    const settled = await Promise.allSettled(taskOptions.map(async (task) => {
+      try {
+        const result = await runTextTask({
+          services,
+          text,
+          cwd,
+          log,
+          systemPrompt: task.systemPrompt,
+          preserveLineBreaks: task.preserveLineBreaks,
+          signal: controller.signal,
+        });
+        return [task.name, result];
+      } catch (error) {
+        controller.abort(error);
+        throw error;
+      }
+    }));
+
+    const failure = settled.find((result) => result.status === 'rejected');
+    if (failure) {
+      throw failure.reason;
+    }
+    throwIfAborted(controller.signal);
+
+    const results = Object.fromEntries(settled.map((result) => result.value));
+    const costs = [results.correction.cost, results.natural.cost, results.feedback.cost]
+      .filter((cost) => cost !== undefined);
+    return validateReviewResponse({
+      correction: results.correction.text,
+      natural: results.natural.text,
+      takeaway: results.feedback.text,
+      feedback: results.feedback.text,
+      cost: costs.length > 0 ? costs.reduce((total, cost) => total + cost, 0) : undefined,
+    });
+  } finally {
+    clearTimeout(timeout);
+    signal?.removeEventListener('abort', cancel);
+  }
 }
 
 export async function writeJsonFile(filePath, value) {

@@ -1,0 +1,364 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+umask 077
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+PLUGIN_ID="hazat.word-fixer"
+SDK_PACKAGE="@earendil-works/pi-coding-agent"
+PROVIDER="openai-codex"
+MODEL="gpt-5.4-mini"
+CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
+BIN_HOME="$HOME/.local/bin"
+CONFIG_DIR="$CONFIG_HOME/word-fixer"
+PI_DIR="$CONFIG_DIR/.pi"
+DATA_DIR="$DATA_HOME/word-fixer"
+SDK_DIR="$DATA_DIR/sdk"
+NPM_CACHE_DIR="$DATA_DIR/npm-cache"
+SUPPORT_BIN_DIR="$DATA_DIR/bin"
+CONFIG_FILE="$CONFIG_DIR/config.json"
+SETTINGS_FILE="$PI_DIR/settings.json"
+AUTH_FILE="$HOME/.pi/agent/auth.json"
+SDK_MANIFEST="$ROOT/helper/package.json"
+SDK_LOCKFILE="$ROOT/helper/package-lock.json"
+SDK_LOADER="$ROOT/helper/sdk-loader.mjs"
+DEFAULT_SETTINGS="$ROOT/shared/settings.json"
+PLUGIN_LINK="$HOME/.config/omarchy/plugins/$PLUGIN_ID"
+CLIENT_LINK="$BIN_HOME/word-fixer"
+CHECK_ONLY=0
+PI_COMMAND=""
+NODE_COMMAND=""
+NPM_COMMAND=""
+
+usage() {
+  echo "Usage: linux/install [--check]"
+}
+
+fail() {
+  echo "word-fixer-install: $*" >&2
+  exit 1
+}
+
+ok() {
+  printf '[ok] %s\n' "$*"
+}
+
+missing() {
+  printf '[missing] %s\n' "$*" >&2
+  return 1
+}
+
+while (( $# > 0 )); do
+  case "$1" in
+    --check)
+      CHECK_ONLY=1
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    *)
+      usage >&2
+      fail "unknown option: $1"
+      ;;
+  esac
+  shift
+done
+
+locked_sdk_version() {
+  jq -er --arg package "$SDK_PACKAGE" '.dependencies[$package] | select(type == "string" and test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))' "$SDK_MANIFEST"
+}
+
+sdk_is_current() {
+  local installed_package="$SDK_DIR/node_modules/@earendil-works/pi-coding-agent/package.json"
+  [[ -r $SDK_DIR/package.json && -r $SDK_DIR/package-lock.json && -r $installed_package ]] || return 1
+  cmp -s "$SDK_MANIFEST" "$SDK_DIR/package.json" || return 1
+  cmp -s "$SDK_LOCKFILE" "$SDK_DIR/package-lock.json" || return 1
+  cmp -s "$SDK_LOADER" "$SDK_DIR/sdk-loader.mjs" || return 1
+  [[ $(jq -er '.version' "$installed_package" 2>/dev/null) == "$(locked_sdk_version)" ]] || return 1
+  SDK_CHECK_DIR="$SDK_DIR" "$NODE_COMMAND" --input-type=module -e '
+    import path from "node:path";
+    import { pathToFileURL } from "node:url";
+    await import(pathToFileURL(path.join(process.env.SDK_CHECK_DIR, "sdk-loader.mjs")));
+  ' >/dev/null 2>&1
+}
+
+preflight() {
+  local command_name node_version model_output auth_output sdk_version
+  local required_commands=(node npm jq wl-copy wl-paste hyprctl notify-send omarchy omarchy-shell pi)
+
+  for command_name in "${required_commands[@]}"; do
+    command -v "$command_name" >/dev/null 2>&1 || fail "required command '$command_name' was not found on PATH."
+  done
+
+  NODE_COMMAND="$(command -v node)"
+  NPM_COMMAND="$(command -v npm)"
+  PI_COMMAND="$(command -v pi)"
+  [[ $NODE_COMMAND == /* && -x $NODE_COMMAND ]] || fail "node must resolve to an absolute executable path."
+  [[ $NPM_COMMAND == /* && -x $NPM_COMMAND ]] || fail "npm must resolve to an absolute executable path."
+  [[ $PI_COMMAND == /* && -x $PI_COMMAND ]] || fail "pi must resolve to an absolute executable path."
+
+  node_version="$($NODE_COMMAND -p 'process.versions.node')"
+  "$NODE_COMMAND" -e '
+    const [major, minor] = process.versions.node.split(".").map(Number);
+    process.exit(major > 22 || (major === 22 && minor >= 19) ? 0 : 1);
+  ' || fail "Node.js 22.19 or newer is required (found v$node_version)."
+
+  [[ -r $SDK_MANIFEST && -r $SDK_LOCKFILE && -r $SDK_LOADER ]] || fail "locked SDK runtime files are missing from $ROOT/helper."
+  [[ -r $DEFAULT_SETTINGS ]] || fail "shared Word Fixer settings are missing from $DEFAULT_SETTINGS."
+  jq -e --arg provider "$PROVIDER" --arg model "$MODEL" --arg key "$PROVIDER/$MODEL" \
+    '.defaultProvider == $provider and .defaultModel == $model and .defaultThinkingLevel == "off" and .modelThinkingLevels[$key] == "off"' \
+    "$DEFAULT_SETTINGS" >/dev/null || fail "$DEFAULT_SETTINGS does not select the required model with thinking off."
+  sdk_version="$(locked_sdk_version)" || fail "$SDK_MANIFEST must pin $SDK_PACKAGE to an exact version."
+  jq -e --arg package "$SDK_PACKAGE" --arg version "$sdk_version" \
+    '.packages["node_modules/" + $package].version == $version' "$SDK_LOCKFILE" >/dev/null \
+    || fail "$SDK_LOCKFILE does not lock $SDK_PACKAGE at $sdk_version."
+
+  [[ -r $AUTH_FILE ]] || fail "canonical Pi authentication is missing at $AUTH_FILE. Sign in with pi; credentials are never copied into Word Fixer config."
+
+  model_output="$($PI_COMMAND --list-models "$PROVIDER/$MODEL")" || fail "could not query the required Pi model $PROVIDER/$MODEL."
+  awk -v provider="$PROVIDER" -v model="$MODEL" 'NR > 1 && $1 == provider && $2 == model { found = 1 } END { exit !found }' <<<"$model_output" \
+    || fail "required model $PROVIDER/$MODEL is unavailable; no fallback model will be used."
+
+  auth_output="$($PI_COMMAND auth check --provider "$PROVIDER" --model "$MODEL" --json --no-refresh)" \
+    || fail "canonical authentication for $PROVIDER/$MODEL is not ready."
+  jq -e --arg provider "$PROVIDER" '.status == "ready" and .provider == $provider and (.authType | type == "string")' \
+    <<<"$auth_output" >/dev/null \
+    || fail "canonical authentication for $PROVIDER/$MODEL is not ready."
+
+  omarchy plugin validate "$ROOT" >/dev/null \
+    || fail "the repository is not a valid Omarchy plugin."
+  [[ $(omarchy-shell shell ping) == "ok" ]] \
+    || fail "the running Omarchy shell did not answer its supported ping command."
+
+  case ":$PATH:" in
+    *":$BIN_HOME:"*) ;;
+    *) fail "$BIN_HOME is not on PATH; the installed word-fixer client would not be discoverable." ;;
+  esac
+
+  ok "prerequisites: Node v$node_version, npm $($NPM_COMMAND --version), Pi $($PI_COMMAND --version)"
+  ok "locked app SDK: $SDK_PACKAGE@$sdk_version"
+  ok "required model: $PROVIDER/$MODEL"
+  ok "canonical auth: $AUTH_FILE"
+  ok "Omarchy manifest and running shell"
+}
+
+link_matches() {
+  local link_path="$1" expected_path="$2"
+  [[ -L $link_path ]] || return 1
+  [[ $(readlink -f "$link_path") == "$(readlink -f "$expected_path")" ]]
+}
+
+ensure_link() {
+  local source_path="$1" target_path="$2" label="$3"
+  if [[ -L $target_path ]]; then
+    link_matches "$target_path" "$source_path" \
+      || fail "$label already points somewhere else: $target_path"
+    return
+  fi
+  [[ ! -e $target_path ]] || fail "$label already exists and is not the expected link: $target_path"
+  ln -s "$source_path" "$target_path"
+}
+
+seed_file() {
+  local source_path="$1" target_path="$2"
+  if [[ ! -e $target_path ]]; then
+    cp "$source_path" "$target_path"
+    chmod 600 "$target_path"
+  fi
+}
+
+write_config() {
+  local temporary_file
+  temporary_file="$(mktemp "$CONFIG_DIR/.config.json.XXXXXX")"
+  if [[ -e $CONFIG_FILE ]]; then
+    jq -e 'type == "object"' "$CONFIG_FILE" >/dev/null \
+      || fail "$CONFIG_FILE must contain a JSON object."
+    jq --arg node "$SUPPORT_BIN_DIR/node" 'del(.piBinaryPath) + {nodeBinaryPath: $node}' "$CONFIG_FILE" >"$temporary_file"
+  else
+    jq -n --arg node "$SUPPORT_BIN_DIR/node" '{nodeBinaryPath: $node, debugLogging: false}' >"$temporary_file"
+  fi
+  chmod 600 "$temporary_file"
+  mv "$temporary_file" "$CONFIG_FILE"
+}
+
+seed_settings() {
+  seed_file "$DEFAULT_SETTINGS" "$SETTINGS_FILE"
+}
+
+install_sdk() {
+  local temporary_directory
+  if sdk_is_current; then
+    return
+  fi
+
+  mkdir -p "$DATA_DIR" "$NPM_CACHE_DIR"
+  chmod 700 "$DATA_DIR" "$NPM_CACHE_DIR"
+  temporary_directory="$(mktemp -d "$DATA_DIR/.sdk-install.XXXXXX")"
+  cp "$SDK_MANIFEST" "$temporary_directory/package.json"
+  cp "$SDK_LOCKFILE" "$temporary_directory/package-lock.json"
+  cp "$SDK_LOADER" "$temporary_directory/sdk-loader.mjs"
+
+  if ! (
+    cd "$temporary_directory"
+    NPM_CONFIG_CACHE="$NPM_CACHE_DIR" "$NPM_COMMAND" ci --omit=dev --ignore-scripts --no-audit --no-fund
+  ); then
+    rm -rf "$temporary_directory"
+    fail "could not install the locked $SDK_PACKAGE dependency. Restore network access or populate the app npm cache at $NPM_CACHE_DIR, then run word-fixer-setup again."
+  fi
+
+  if ! (
+    SDK_CHECK_DIR="$temporary_directory" "$NODE_COMMAND" --input-type=module -e '
+      import path from "node:path";
+      import { pathToFileURL } from "node:url";
+      await import(pathToFileURL(path.join(process.env.SDK_CHECK_DIR, "sdk-loader.mjs")));
+    '
+  ); then
+    rm -rf "$temporary_directory"
+    fail "the installed $SDK_PACKAGE package could not be loaded by Node."
+  fi
+
+  rm -rf "$SDK_DIR"
+  mv "$temporary_directory" "$SDK_DIR"
+}
+
+plugin_record() {
+  omarchy plugin list --json | jq -c --arg id "$PLUGIN_ID" 'map(select(.id == $id))[0] // empty'
+}
+
+bar_has_word_fixer() {
+  omarchy-shell shell listShellConfig \
+    | jq -e --arg id "$PLUGIN_ID" '[.bar.layout?[]?[]? | select(.id == $id)] | length == 1' >/dev/null
+}
+
+install_plugin() {
+  local record=""
+  ensure_link "$ROOT" "$PLUGIN_LINK" "Omarchy plugin"
+  omarchy-shell shell rescanPlugins >/dev/null
+
+  for _ in {1..40}; do
+    record="$(plugin_record)"
+    [[ -n $record ]] && break
+    sleep 0.05
+  done
+  [[ -n $record ]] || fail "Omarchy did not discover plugin $PLUGIN_ID after rescan."
+
+  if ! bar_has_word_fixer; then
+    # Older overlay-only installs enabled the plugin through plugins[]. Remove
+    # that legacy location before `bar put`, which otherwise mistakes it for an
+    # existing bar slot. The bar entry enables both plugin kinds.
+    omarchy plugin disable "$PLUGIN_ID" >/dev/null 2>&1 || true
+    omarchy bar put "$PLUGIN_ID" --section right >/dev/null
+  elif ! jq -e '.enabled == true' <<<"$record" >/dev/null; then
+    omarchy plugin enable "$PLUGIN_ID" >/dev/null
+  fi
+}
+
+check_installation() {
+  local failures=0 record config_node
+
+  if [[ -r $CONFIG_FILE ]] && config_node="$(jq -er '.nodeBinaryPath | select(type == "string")' "$CONFIG_FILE" 2>/dev/null)" \
+      && [[ $config_node == "$SUPPORT_BIN_DIR/node" ]] \
+      && ! jq -e 'has("piBinaryPath")' "$CONFIG_FILE" >/dev/null 2>&1; then
+    ok "app config: $CONFIG_FILE"
+  else
+    missing "app config with dedicated Node path: $CONFIG_FILE" || failures=$((failures + 1))
+  fi
+
+  if link_matches "$SUPPORT_BIN_DIR/node" "$NODE_COMMAND"; then
+    ok "Node runtime link: $SUPPORT_BIN_DIR/node"
+  else
+    missing "Node runtime link: $SUPPORT_BIN_DIR/node" || failures=$((failures + 1))
+  fi
+
+  if sdk_is_current; then
+    ok "locked app SDK: $SDK_DIR ($SDK_PACKAGE@$(locked_sdk_version))"
+  else
+    missing "locked app SDK installation: $SDK_DIR" || failures=$((failures + 1))
+  fi
+
+  if [[ ! -e $CONFIG_DIR/helper.json && ! -e $CONFIG_DIR/debug.log && ! -e $PI_DIR/models-store.json ]]; then
+    ok "SDK and helper runtime state: $DATA_DIR"
+  else
+    missing "runtime state must not be stored under $CONFIG_DIR" || failures=$((failures + 1))
+  fi
+
+  if [[ -r $SETTINGS_FILE ]] && jq -e \
+      --arg provider "$PROVIDER" --arg model "$MODEL" --arg key "$PROVIDER/$MODEL" \
+      '.defaultProvider == $provider and .defaultModel == $model and .defaultThinkingLevel == "off" and .modelThinkingLevels[$key] == "off"' \
+      "$SETTINGS_FILE" >/dev/null 2>&1; then
+    ok "dedicated model settings: $PROVIDER/$MODEL, thinking off"
+  else
+    missing "dedicated settings at $SETTINGS_FILE (no fallback model is accepted)" || failures=$((failures + 1))
+  fi
+
+  local prompt_name
+  for prompt_name in SYSTEM NATURAL FEEDBACK; do
+    if [[ -s $PI_DIR/$prompt_name.md ]]; then
+      ok "prompt: $PI_DIR/$prompt_name.md"
+    else
+      missing "prompt: $PI_DIR/$prompt_name.md" || failures=$((failures + 1))
+    fi
+  done
+
+  if link_matches "$PLUGIN_LINK" "$ROOT"; then
+    ok "plugin source link: $PLUGIN_LINK -> $ROOT"
+  else
+    missing "plugin source link: $PLUGIN_LINK -> $ROOT" || failures=$((failures + 1))
+  fi
+
+  record="$(plugin_record)"
+  if [[ -n $record ]] && jq -e \
+      '.enabled == true and (.kinds | index("overlay") != null) and (.kinds | index("bar-widget") != null)' \
+      <<<"$record" >/dev/null; then
+    ok "plugin enablement: $PLUGIN_ID (overlay and bar widget)"
+  else
+    missing "enabled Omarchy overlay/bar-widget plugin: $PLUGIN_ID" || failures=$((failures + 1))
+  fi
+
+  if bar_has_word_fixer; then
+    ok "bar status icon: $PLUGIN_ID"
+  else
+    missing "bar status icon: $PLUGIN_ID" || failures=$((failures + 1))
+  fi
+
+  if link_matches "$CLIENT_LINK" "$ROOT/linux/bin/word-fixer" \
+      && [[ $(command -v word-fixer 2>/dev/null || true) == "$CLIENT_LINK" ]]; then
+    ok "discoverable client: $CLIENT_LINK"
+  else
+    missing "discoverable client link: $CLIENT_LINK" || failures=$((failures + 1))
+  fi
+
+  if [[ -e $PI_DIR/auth.json || -L $PI_DIR/auth.json ]]; then
+    missing "app-local credentials must not exist: $PI_DIR/auth.json" || failures=$((failures + 1))
+  else
+    ok "auth remains canonical only: $AUTH_FILE"
+  fi
+
+  (( failures == 0 )) || fail "$failures installation check(s) failed."
+  echo "Word Fixer installation check passed."
+}
+
+preflight
+
+if (( CHECK_ONLY )); then
+  check_installation
+  exit 0
+fi
+
+mkdir -p "$CONFIG_DIR" "$PI_DIR" "$DATA_DIR" "$SUPPORT_BIN_DIR" "$(dirname "$PLUGIN_LINK")" "$BIN_HOME"
+chmod 700 "$CONFIG_DIR" "$PI_DIR" "$DATA_DIR" "$SUPPORT_BIN_DIR"
+
+install_sdk
+rm -f "$CONFIG_DIR/helper.json" "$CONFIG_DIR/debug.log" "$PI_DIR/models-store.json"
+ensure_link "$NODE_COMMAND" "$SUPPORT_BIN_DIR/node" "Node runtime executable"
+seed_file "$ROOT/shared/prompts/SYSTEM.md" "$PI_DIR/SYSTEM.md"
+seed_file "$ROOT/shared/prompts/NATURAL.md" "$PI_DIR/NATURAL.md"
+seed_file "$ROOT/shared/prompts/FEEDBACK.md" "$PI_DIR/FEEDBACK.md"
+seed_settings
+write_config
+ensure_link "$ROOT/linux/bin/word-fixer" "$CLIENT_LINK" "Word Fixer client"
+install_plugin
+
+check_installation

@@ -3,7 +3,7 @@ import Foundation
 enum DebugLog {
     static var isEnabled = true
 
-    private static let logFile = ConfigManager.configDir.appendingPathComponent("debug.log")
+    private static let logFile = ConfigManager.dataDir.appendingPathComponent("debug.log")
     private static let formatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]

@@ -22,7 +22,7 @@ final class AppState {
 
     init(configManager: ConfigManager) {
         self.configManager = configManager
-        DebugLog.write("AppState.init piBinaryPath=\(configManager.config.piBinaryPath)")
+        DebugLog.write("AppState.init nodeBinaryPath=\(configManager.config.nodeBinaryPath)")
 
         Task {
             DebugLog.write("AppState prewarm start")

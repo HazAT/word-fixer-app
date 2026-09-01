@@ -47,8 +47,8 @@ Typical actions:
 
 | Condition | Action |
 |---|---|
-| `pi` missing | Tell the user Word Fixer depends on an installed Pi runtime and ask them to install/configure `pi` first |
-| Word Fixer config missing | Offer to run `make install`, `make install-system`, or launch the app once so config can be bootstrapped with the detected `pi` path |
+| `pi` missing | Tell the user Word Fixer requires Pi for canonical authentication and model discovery, then ask them to install/configure `pi` first |
+| Word Fixer config or app runtime missing | Offer to run `make install` or `make install-system` so the locked SDK, dedicated Node link, prompts, settings, and config are bootstrapped together |
 | App not installed | Offer to run `make install` or `make reinstall` |
 | Installed app path exists but user is testing from mixed locations | Recommend using the installed app path consistently |
 | Accessibility permission not confirmed | Explain the exact System Settings path and the app path that must be authorized |
@@ -85,8 +85,9 @@ Check:
 - the app builds successfully if you ran a build
 - the installed app exists if you ran install
 - the config directory exists
-- `config.json` exists and `piBinaryPath` points at the detected `pi` binary when install/bootstrap was part of the workflow
-- `~/.config/word-fixer/.pi/SYSTEM.md` exists
+- `config.json` exists and `nodeBinaryPath` points at the dedicated app-data Node link when install/bootstrap was part of the workflow
+- `~/.local/share/word-fixer/sdk/` contains the locked app-owned SDK
+- `~/.config/word-fixer/.pi/SYSTEM.md` and `settings.json` exist
 - `~/.pi/agent/auth.json` exists when auth is required
 
 Then give the user a final manual verification sequence:

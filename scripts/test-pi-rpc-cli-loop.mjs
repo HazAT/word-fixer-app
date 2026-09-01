@@ -8,19 +8,18 @@ const prompt1 = positional[0] ?? 'helo wrld';
 const prompt2 = positional[1] ?? 'ths is a tst';
 const timeoutMs = Number(options.timeoutMs ?? 20000);
 
-const { piBinaryPath, piDir } = await loadWordFixerConfig();
-const binaryDir = new URL('.', `file://${piBinaryPath}`).pathname;
+const { piDir } = await loadWordFixerConfig();
+const piCommand = process.env.WORD_FIXER_PI_PATH ?? 'pi';
 const env = {
   ...process.env,
   PI_CODING_AGENT_DIR: piDir,
-  PATH: `${binaryDir}:${process.env.PATH ?? '/usr/bin:/bin'}`,
 };
 
 log('starting CLI RPC loop test');
 log('prompt1', JSON.stringify(prompt1));
 log('prompt2', JSON.stringify(prompt2));
 
-const child = spawn(piBinaryPath, ['--mode', 'rpc', '--no-tools', '--no-session', '--thinking', 'off'], {
+const child = spawn(piCommand, ['--mode', 'rpc', '--no-tools', '--no-session', '--thinking', 'off'], {
   env,
   stdio: ['pipe', 'pipe', 'pipe'],
 });

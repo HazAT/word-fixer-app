@@ -4,24 +4,29 @@ import path from 'node:path';
 import process from 'node:process';
 import {
   createLogger,
+  DEFAULT_REVIEW_TIMEOUT_MS,
   loadPiServices,
   loadWordFixerConfig,
+  MAX_REVIEW_INPUT_BYTES,
   removeFileIfPresent,
   reviewText,
+  validateReviewInput,
   writeJsonFile,
 } from './helper-lib.mjs';
 
 const apiVersion = 3;
 const idleTimeoutMs = Number(process.env.WORD_FIXER_HELPER_IDLE_MS ?? 120000);
+const reviewTimeoutMs = Number(process.env.WORD_FIXER_HELPER_REVIEW_MS ?? DEFAULT_REVIEW_TIMEOUT_MS);
+const maximumBodyBytes = (MAX_REVIEW_INPUT_BYTES * 6) + 1024;
 const cwd = process.env.WORD_FIXER_HELPER_CWD || process.cwd();
 
 const config = await loadWordFixerConfig();
 const debugEnabled = process.env.WORD_FIXER_DEBUG === '1' || config.debugLogging === true;
 const logger = createLogger({
   debugEnabled,
-  logFile: path.join(config.configDir, 'debug.log'),
+  logFile: path.join(config.dataDir, 'debug.log'),
 });
-const helperStatePath = path.join(config.configDir, 'helper.json');
+const helperStatePath = path.join(config.dataDir, 'helper.json');
 
 let servicesPromise = null;
 let server = null;
@@ -45,18 +50,38 @@ function sendJson(response, statusCode, payload) {
 
 async function readJsonBody(request) {
   const chunks = [];
+  let byteLength = 0;
   for await (const chunk of request) {
+    byteLength += chunk.length;
+    if (byteLength > maximumBodyBytes) {
+      const error = new Error(`Request body exceeds the ${maximumBodyBytes}-byte limit.`);
+      error.code = 'REQUEST_TOO_LARGE';
+      throw error;
+    }
     chunks.push(chunk);
   }
   const body = Buffer.concat(chunks).toString('utf8').trim();
   return body ? JSON.parse(body) : {};
 }
 
+function errorStatus(error) {
+  if (error?.code === 'REQUEST_TOO_LARGE') {
+    return 413;
+  }
+  if (error?.code === 'INVALID_REVIEW_INPUT' || error instanceof SyntaxError) {
+    return 400;
+  }
+  if (error?.code === 'REVIEW_TIMEOUT') {
+    return 504;
+  }
+  return 500;
+}
+
 async function ensureServices() {
   if (!servicesPromise) {
     servicesPromise = loadPiServices({
       piDir: config.piDir,
-      piBinaryPath: config.piBinaryPath,
+      dataDir: config.dataDir,
       cwd,
       log: logger,
     });
@@ -89,6 +114,16 @@ async function handleRequest(request, response) {
     return;
   }
 
+  const controller = new AbortController();
+  const cancelReview = () => controller.abort();
+  const cancelClosedResponse = () => {
+    if (!response.writableEnded) {
+      cancelReview();
+    }
+  };
+  request.once('aborted', cancelReview);
+  response.once('close', cancelClosedResponse);
+
   try {
     if (request.url === '/health') {
       sendJson(response, 200, { ok: true, ready: true, pid: process.pid, apiVersion });
@@ -110,11 +145,7 @@ async function handleRequest(request, response) {
 
     const startedAt = Date.now();
     const body = await readJsonBody(request);
-    const text = typeof body.text === 'string' ? body.text : '';
-    if (!text) {
-      sendJson(response, 400, { ok: false, error: 'Missing text' });
-      return;
-    }
+    const text = validateReviewInput(body?.text);
 
     const currentServices = await ensureServices();
     const review = await reviewText({
@@ -122,6 +153,8 @@ async function handleRequest(request, response) {
       text,
       cwd,
       log: logger,
+      signal: controller.signal,
+      timeoutMs: reviewTimeoutMs,
     });
     await logger.log('review complete', {
       durationMs: Date.now() - startedAt,
@@ -135,7 +168,12 @@ async function handleRequest(request, response) {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await logger.log('request failed', { url: request.url, error: message });
-    sendJson(response, 500, { ok: false, error: message });
+    if (!response.writableEnded && !response.destroyed) {
+      sendJson(response, errorStatus(error), { ok: false, error: message });
+    }
+  } finally {
+    request.removeListener('aborted', cancelReview);
+    response.removeListener('close', cancelClosedResponse);
   }
 }
 
@@ -158,7 +196,16 @@ await writeJsonFile(helperStatePath, {
   port: address.port,
   apiVersion,
 });
-await logger.log('listening', { pid: process.pid, port: address.port, helperStatePath, idleTimeoutMs, cwd, piDir: config.piDir });
+await logger.log('listening', {
+  pid: process.pid,
+  port: address.port,
+  helperStatePath,
+  idleTimeoutMs,
+  reviewTimeoutMs,
+  maximumInputBytes: MAX_REVIEW_INPUT_BYTES,
+  cwd,
+  piDir: config.piDir,
+});
 resetIdleTimer();
 
 for (const signal of ['SIGINT', 'SIGTERM']) {

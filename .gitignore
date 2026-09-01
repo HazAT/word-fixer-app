@@ -6,3 +6,16 @@ Resources/AppIcon.icns
 Resources/AppIcon.iconset/
 *.o
 *.d
+/helper/node_modules/
+
+# Linux generated/runtime state
+/word-fixer/
+/linux/.generated/
+/linux/.runtime/
+**/helper.json
+**/debug.log
+**/*.sock
+**/*.socket
+**/active.lock/
+**/request-*/
+**/auth.json
