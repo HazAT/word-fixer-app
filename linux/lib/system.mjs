@@ -22,6 +22,7 @@ export function runCommand(command, args, {
   signal,
   timeoutMs = 5_000,
   maximumOutputBytes = 1024 * 1024,
+  captureOutput = true,
   env = process.env,
 } = {}) {
   return new Promise((resolve, reject) => {
@@ -31,7 +32,7 @@ export function runCommand(command, args, {
     const stderr = [];
     const child = spawn(command, args, {
       env,
-      stdio: ['pipe', 'pipe', 'pipe'],
+      stdio: ['pipe', captureOutput ? 'pipe' : 'ignore', captureOutput ? 'pipe' : 'ignore'],
       shell: false,
     });
 
@@ -65,8 +66,8 @@ export function runCommand(command, args, {
       return;
     }
     child.once('error', finish);
-    child.stdout.on('data', collect(stdout));
-    child.stderr.on('data', collect(stderr));
+    child.stdout?.on('data', collect(stdout));
+    child.stderr?.on('data', collect(stderr));
     child.once('close', (code, childSignal) => {
       const standardOutput = Buffer.concat(stdout);
       const standardError = Buffer.concat(stderr).toString('utf8');
@@ -311,7 +312,13 @@ export class LinuxSystem {
     await this.command(
       'wl-copy',
       ['--type', 'text/plain;charset=utf-8'],
-      { input: Buffer.from(text, 'utf8'), signal, timeoutMs: 2_000, maximumOutputBytes: 64 * 1024 },
+      {
+        input: Buffer.from(text, 'utf8'),
+        signal,
+        timeoutMs: 2_000,
+        maximumOutputBytes: 64 * 1024,
+        captureOutput: false,
+      },
     );
   }
 

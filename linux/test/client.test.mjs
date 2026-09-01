@@ -14,7 +14,7 @@ import {
   CompletionTimeoutError,
   DuplicateInvocationError,
 } from '../lib/runtime.mjs';
-import { HelperClient, LinuxSystem } from '../lib/system.mjs';
+import { HelperClient, LinuxSystem, runCommand } from '../lib/system.mjs';
 import {
   createCancelCompletion,
   createChoiceCompletion,
@@ -391,6 +391,18 @@ test('helper client reuses a healthy API-v3 helper and preserves request text in
   assert.equal(requests[1].body.text, text);
 });
 
+test('runCommand can ignore inherited daemon output pipes', async (t) => {
+  const directory = await temporaryRuntime(t);
+  const command = path.join(directory, 'forking-command');
+  await fs.writeFile(command, '#!/bin/sh\ncat >/dev/null\n(sleep 1) &\n', { mode: 0o700 });
+
+  await runCommand(command, [], {
+    input: Buffer.from('clipboard text'),
+    timeoutMs: 250,
+    captureOutput: false,
+  });
+});
+
 test('Linux clipboard transport clears capture state, reads plain text, and writes through stdin', async () => {
   const calls = [];
   const text = 'line 1\nUnicode 😀 $(shell) <markup>';
@@ -410,6 +422,7 @@ test('Linux clipboard transport clears capture state, reads plain text, and writ
   assert.deepEqual(calls[1].args, ['--type', 'text', '--no-newline']);
   assert.deepEqual(calls[2].args, ['--type', 'text/plain;charset=utf-8']);
   assert.equal(calls[2].options.input.toString('utf8'), text);
+  assert.equal(calls[2].options.captureOutput, false);
   assert.equal(calls.some(({ args }) => args.includes(text)), false);
 });
 
