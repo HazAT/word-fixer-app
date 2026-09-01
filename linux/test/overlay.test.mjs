@@ -177,6 +177,7 @@ test('manifest and QML declare a keep-loaded overlay with a ready-state bar icon
   assert.match(barWidget, /BarWidget\s*\{/);
   assert.match(barWidget, /Word Fixer ready · SUPER\+SHIFT\+C/);
   assert.match(barWidget, /active\.lock\/owner\.json/);
+  assert.match(barWidget, /text: "W"/);
   assert.match(barWidget, /active: root\.reviewing/);
   assert.match(barWidget, /interval: 750/);
   assert.match(qml, /function open\(locatorJson\)/);

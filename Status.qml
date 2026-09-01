@@ -39,7 +39,8 @@ Ui.BarWidget {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: "󰓆"
+    text: "W"
+    fontSize: Style.font.caption
     active: root.reviewing
     tooltipText: root.reviewing
       ? "Word Fixer · Reviewing text"
