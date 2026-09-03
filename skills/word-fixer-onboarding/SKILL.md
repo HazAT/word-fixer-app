@@ -5,6 +5,8 @@ description: Guides end-to-end onboarding for the Word Fixer app from a clean ch
 
 Guide the user through a managed Word Fixer setup until the installed app is ready to use.
 
+This skill covers the macOS app. On Omarchy the setup is `./linux/install` followed by `./linux/install --check` (see README); the macOS steps below do not apply there.
+
 ## Step 1: Inspect the current state
 
 Start by checking the environment before proposing changes.
@@ -18,8 +20,6 @@ Inspect:
 - whether global Pi auth exists at `~/.pi/agent/auth.json`
 - whether `~/Applications/Word Fixer.app` exists
 - whether `/Applications/Word Fixer.app` exists
-
-Use `bash` for existence checks and `read` for config contents.
 
 ## Step 2: Summarize onboarding status
 
@@ -107,7 +107,7 @@ End with one of these outcomes:
 
 - `Onboarding complete` — all required setup is in place, with any remaining manual Accessibility check called out explicitly
 - `Blocked on pi installation` — Pi runtime is missing
-- `Blocked on user confirmation` — waiting to install, copy auth, or edit config
+- `Blocked on user confirmation` — waiting to install or edit config
 - `Blocked on macOS permission` — app is installed but Accessibility is not yet granted
 
 Use concise bullets. Include exact file paths and commands actually used.

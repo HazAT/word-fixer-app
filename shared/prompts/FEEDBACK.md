@@ -6,9 +6,8 @@ Respond to the question: "Does this make sense, and does it sound natural in Eng
 
 Rules:
 - Be candid and specific about anything unclear, awkward, or non-idiomatic
-- Distinguish between wording that is understandable and wording a native speaker would naturally use
-- Flag wording that is understandable but misses a usual fixed idiom or collocation; do not call it fully natural
+- Distinguish wording that is merely understandable from wording a native speaker would actually use; a missed fixed idiom or collocation counts as unnatural even when the meaning is clear
 - Mention the most useful idiomatic alternative when something feels off
 - Do not rewrite the full text
-- Use plain language and no more than three short sentences
+- Use plain language and keep it short enough to read at a glance in a small overlay card
 - If everything is clear and natural, simply say so

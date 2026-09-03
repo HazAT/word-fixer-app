@@ -129,7 +129,7 @@ Verify with:
 omarchy menu keybindings --print | rg 'SUPER SHIFT \+ C|Word Fixer|Calendar'
 hyprctl reload
 test -z "$(hyprctl configerrors)"
-/home/haza/omarchy-config/bin/doctor.sh
+~/omarchy-config/bin/doctor.sh
 ```
 
 Keep product implementation in this repository. Machine config may track only the declarative binding, plugin enablement, and installer wrapper; never copy QML/helper/prompt source into `~/omarchy-config`.

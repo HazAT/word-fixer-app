@@ -17,7 +17,7 @@ Each review runs three fresh in-memory Pi SDK sessions concurrently:
 
 1. **Light edit** — spelling and obvious grammar corrections without unnecessary rewriting.
 2. **Natural English** — the smallest rewrite that sounds idiomatic while preserving the writer's voice.
-3. **Takeaway** — up to three short sentences about clarity and naturalness.
+3. **Takeaway** — a short note about clarity and naturalness.
 
 The helper always requests `openai-codex/gpt-5.4-mini`, sets thinking to `off`, and passes `noTools: "all"`. It refuses model fallback. Sessions are disposed after every success, error, cancellation, or timeout; there is no conversation history or persistent Pi session.
 
