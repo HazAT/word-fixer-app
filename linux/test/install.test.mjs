@@ -58,7 +58,7 @@ set -euo pipefail
 printf 'pi %s\\n' "$*" >>"$WF_STUB_LOG"
 if [[ \${1:-} == --list-models ]]; then
   printf 'provider      model         context  max-out  thinking  images\\n'
-  ${modelAvailable ? "printf 'openai-codex  gpt-5.4-mini  272K     128K     yes       yes\\n'" : ':'}
+  ${modelAvailable ? "printf 'openai-codex  gpt-5.6-luna  272K     128K     yes       yes\\n'" : ':'}
   exit 0
 fi
 if [[ \${1:-} == auth && \${2:-} == check ]]; then
@@ -236,9 +236,9 @@ test('an offline second install is idempotent and preserves custom config outsid
 
   const customSettings = Buffer.from(`{
   "defaultProvider": "openai-codex",
-  "defaultModel": "gpt-5.4-mini",
+  "defaultModel": "gpt-5.6-luna",
   "defaultThinkingLevel": "off",
-  "modelThinkingLevels": {"openai-codex/gpt-5.4-mini": "off"},
+  "modelThinkingLevels": {"openai-codex/gpt-5.6-luna": "off"},
   "customMarker": "preserve these bytes"
 }\n`);
   await fs.writeFile(path.join(piDirectory, 'settings.json'), customSettings);
@@ -266,7 +266,7 @@ test('an offline second install is idempotent and preserves custom config outsid
   assert.equal(await fs.readlink(path.join(harness.dataDirectory, 'bin', 'node')), process.execPath);
   const settings = JSON.parse(customSettings);
   assert.equal(settings.defaultProvider, 'openai-codex');
-  assert.equal(settings.defaultModel, 'gpt-5.4-mini');
+  assert.equal(settings.defaultModel, 'gpt-5.6-luna');
   assert.equal(settings.defaultThinkingLevel, 'off');
   assert.equal(await fs.readlink(path.join(harness.home, '.config', 'omarchy', 'plugins', 'hazat.word-fixer')), repositoryRoot);
   assert.equal(await fs.readlink(path.join(harness.binHome, 'word-fixer')), path.join(repositoryRoot, 'linux', 'bin', 'word-fixer'));
@@ -286,6 +286,31 @@ test('an offline second install is idempotent and preserves custom config outsid
   assert.equal((commandLog.match(/npm ci --omit=dev --ignore-scripts --no-audit --no-fund/g) || []).length, 1);
   assert.equal(await fs.access(path.join(repositoryRoot, 'node_modules')).then(() => true, () => false), false);
   assert.equal(await fs.access(path.join(repositoryRoot, 'helper', 'node_modules')).then(() => true, () => false), false);
+});
+
+test('stale settings and a dangling Node link from an earlier install are refreshed', async (t) => {
+  const harness = await createHarness(t);
+  const piDirectory = path.join(harness.home, '.config', 'word-fixer', '.pi');
+  const nodeLink = path.join(harness.dataDirectory, 'bin', 'node');
+  await fs.mkdir(piDirectory, { recursive: true });
+  await fs.mkdir(path.dirname(nodeLink), { recursive: true });
+  await fs.symlink(path.join(harness.home, 'removed-node-version', 'bin', 'node'), nodeLink);
+  await fs.writeFile(path.join(piDirectory, 'settings.json'), `{
+  "defaultProvider": "openai-codex",
+  "defaultModel": "gpt-5.4-mini",
+  "defaultThinkingLevel": "off",
+  "modelThinkingLevels": {"openai-codex/gpt-5.4-mini": "off"}
+}\n`);
+
+  const install = runInstaller(harness);
+  assert.equal(install.status, 0, install.stderr);
+  assert.deepEqual(
+    await fs.readFile(path.join(piDirectory, 'settings.json')),
+    await fs.readFile(path.join(repositoryRoot, 'shared', 'settings.json')),
+  );
+  assert.equal(await fs.readlink(nodeLink), process.execPath);
+  const check = runInstaller(harness, ['--check']);
+  assert.equal(check.status, 0, check.stderr);
 });
 
 test('an unavailable locked package install fails clearly without a partial SDK', async (t) => {
@@ -320,6 +345,6 @@ test('missing command and unavailable dedicated model fail before installation m
   const before = await snapshotTree(harness.home);
   const missingModel = runInstaller(harness);
   assert.notEqual(missingModel.status, 0);
-  assert.match(missingModel.stderr, /required model openai-codex\/gpt-5\.4-mini is unavailable; no fallback model will be used/);
+  assert.match(missingModel.stderr, /required model openai-codex\/gpt-5\.6-luna is unavailable; no fallback model will be used/);
   assert.deepEqual(await snapshotTree(harness.home), before);
 });

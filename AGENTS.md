@@ -38,7 +38,7 @@ Never clear the clipboard or inject copy from inside the triggering Hyprland Lua
 
 Every task session must use:
 
-- provider/model: `openai-codex/gpt-5.4-mini`;
+- provider/model: `openai-codex/gpt-5.6-luna`;
 - thinking: `off`;
 - tools: `noTools: "all"`;
 - fresh in-memory session, disposed on every completion path.

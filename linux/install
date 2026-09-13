@@ -7,7 +7,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 PLUGIN_ID="hazat.word-fixer"
 SDK_PACKAGE="@earendil-works/pi-coding-agent"
 PROVIDER="openai-codex"
-MODEL="gpt-5.4-mini"
+MODEL="gpt-5.6-luna"
 CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 BIN_HOME="$HOME/.local/bin"
@@ -183,7 +183,19 @@ write_config() {
   mv "$temporary_file" "$CONFIG_FILE"
 }
 
+settings_select_required_model() {
+  [[ -r $1 ]] && jq -e --arg provider "$PROVIDER" --arg model "$MODEL" --arg key "$PROVIDER/$MODEL" \
+    '.defaultProvider == $provider and .defaultModel == $model and .defaultThinkingLevel == "off" and .modelThinkingLevels[$key] == "off"' \
+    "$1" >/dev/null 2>&1
+}
+
 seed_settings() {
+  # Keep an existing settings file only while it still selects the required
+  # model; a stale file from an earlier release would otherwise fail every
+  # check and there is no fallback model to fall back to.
+  if [[ -e $SETTINGS_FILE ]] && ! settings_select_required_model "$SETTINGS_FILE"; then
+    rm -f "$SETTINGS_FILE"
+  fi
   seed_file "$DEFAULT_SETTINGS" "$SETTINGS_FILE"
 }
 
@@ -284,10 +296,7 @@ check_installation() {
     missing "runtime state must not be stored under $CONFIG_DIR" || failures=$((failures + 1))
   fi
 
-  if [[ -r $SETTINGS_FILE ]] && jq -e \
-      --arg provider "$PROVIDER" --arg model "$MODEL" --arg key "$PROVIDER/$MODEL" \
-      '.defaultProvider == $provider and .defaultModel == $model and .defaultThinkingLevel == "off" and .modelThinkingLevels[$key] == "off"' \
-      "$SETTINGS_FILE" >/dev/null 2>&1; then
+  if settings_select_required_model "$SETTINGS_FILE"; then
     ok "dedicated model settings: $PROVIDER/$MODEL, thinking off"
   else
     missing "dedicated settings at $SETTINGS_FILE (no fallback model is accepted)" || failures=$((failures + 1))
@@ -352,6 +361,11 @@ chmod 700 "$CONFIG_DIR" "$PI_DIR" "$DATA_DIR" "$SUPPORT_BIN_DIR"
 
 install_sdk
 rm -f "$CONFIG_DIR/helper.json" "$CONFIG_DIR/debug.log" "$PI_DIR/models-store.json"
+# The Node link is app-owned runtime state: a version manager upgrade moves the
+# interpreter and leaves the old link dangling, so replace rather than refuse.
+if [[ -L $SUPPORT_BIN_DIR/node ]] && ! link_matches "$SUPPORT_BIN_DIR/node" "$NODE_COMMAND"; then
+  rm -f "$SUPPORT_BIN_DIR/node"
+fi
 ensure_link "$NODE_COMMAND" "$SUPPORT_BIN_DIR/node" "Node runtime executable"
 seed_file "$ROOT/shared/prompts/SYSTEM.md" "$PI_DIR/SYSTEM.md"
 seed_file "$ROOT/shared/prompts/NATURAL.md" "$PI_DIR/NATURAL.md"
