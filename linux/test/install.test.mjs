@@ -58,7 +58,7 @@ set -euo pipefail
 printf 'pi %s\\n' "$*" >>"$WF_STUB_LOG"
 if [[ \${1:-} == --list-models ]]; then
   printf 'provider      model         context  max-out  thinking  images\\n'
-  ${modelAvailable ? "printf 'openai-codex  gpt-5.6-luna  272K     128K     yes       yes\\n'" : ':'}
+  ${modelAvailable ? "printf 'openai-codex  gpt-6-luna  272K     128K     yes       yes\\n'" : ':'}
   exit 0
 fi
 if [[ \${1:-} == auth && \${2:-} == check ]]; then
@@ -66,7 +66,7 @@ if [[ \${1:-} == auth && \${2:-} == check ]]; then
   exit 0
 fi
 if [[ \${1:-} == --version ]]; then
-  printf '0.84.4-test\\n'
+  printf '0.87.1-test\\n'
   exit 0
 fi
 exit 2
@@ -236,9 +236,9 @@ test('an offline second install is idempotent and preserves custom config outsid
 
   const customSettings = Buffer.from(`{
   "defaultProvider": "openai-codex",
-  "defaultModel": "gpt-5.6-luna",
+  "defaultModel": "gpt-6-luna",
   "defaultThinkingLevel": "off",
-  "modelThinkingLevels": {"openai-codex/gpt-5.6-luna": "off"},
+  "modelThinkingLevels": {"openai-codex/gpt-6-luna": "off"},
   "customMarker": "preserve these bytes"
 }\n`);
   await fs.writeFile(path.join(piDirectory, 'settings.json'), customSettings);
@@ -261,12 +261,12 @@ test('an offline second install is idempotent and preserves custom config outsid
       'pi-coding-agent',
       'package.json',
     ), 'utf8')).version,
-    '0.84.4',
+    '0.87.1',
   );
   assert.equal(await fs.readlink(path.join(harness.dataDirectory, 'bin', 'node')), process.execPath);
   const settings = JSON.parse(customSettings);
   assert.equal(settings.defaultProvider, 'openai-codex');
-  assert.equal(settings.defaultModel, 'gpt-5.6-luna');
+  assert.equal(settings.defaultModel, 'gpt-6-luna');
   assert.equal(settings.defaultThinkingLevel, 'off');
   assert.equal(await fs.readlink(path.join(harness.home, '.config', 'omarchy', 'plugins', 'hazat.word-fixer')), repositoryRoot);
   assert.equal(await fs.readlink(path.join(harness.binHome, 'word-fixer')), path.join(repositoryRoot, 'linux', 'bin', 'word-fixer'));
@@ -345,6 +345,6 @@ test('missing command and unavailable dedicated model fail before installation m
   const before = await snapshotTree(harness.home);
   const missingModel = runInstaller(harness);
   assert.notEqual(missingModel.status, 0);
-  assert.match(missingModel.stderr, /required model openai-codex\/gpt-5\.6-luna is unavailable; no fallback model will be used/);
+  assert.match(missingModel.stderr, /required model openai-codex\/gpt-6-luna is unavailable; no fallback model will be used/);
   assert.deepEqual(await snapshotTree(harness.home), before);
 });

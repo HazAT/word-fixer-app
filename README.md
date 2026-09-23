@@ -19,7 +19,7 @@ Each review runs three fresh in-memory Pi SDK sessions concurrently:
 2. **Natural English** — the smallest rewrite that sounds idiomatic while preserving the writer's voice.
 3. **Takeaway** — a short note about clarity and naturalness.
 
-The helper always requests `openai-codex/gpt-5.6-luna`, sets thinking to `off`, and passes `noTools: "all"`. It refuses model fallback. Sessions are disposed after every success, error, cancellation, or timeout; there is no conversation history or persistent Pi session.
+The helper always requests `openai-codex/gpt-6-luna`, sets thinking to `off`, and passes `noTools: "all"`. It refuses model fallback. Sessions are disposed after every success, error, cancellation, or timeout; there is no conversation history or persistent Pi session.
 
 Prompts and model settings are app-specific, while authentication remains in Pi's canonical file:
 
@@ -49,7 +49,7 @@ The fallback is less reliable than AX and is not the preferred architecture.
 - macOS 14+
 - Swift 5.10+
 - Node.js 22.19 or newer and npm
-- `pi` installed with canonical authentication ready for `openai-codex/gpt-5.6-luna`
+- `pi` installed with canonical authentication ready for `openai-codex/gpt-6-luna`
 - Accessibility permission for the installed app, or for the terminal when using `swift run`
 
 ```bash
@@ -107,7 +107,7 @@ The installer checks the actual runtime before changing files. A supported setup
 - `wl-copy`/`wl-paste`, `hyprctl`, and `notify-send`.
 - `omarchy`, `omarchy-shell`, and `pi` on `PATH`.
 - `~/.local/bin` on `PATH`.
-- Canonical Pi auth at `~/.pi/agent/auth.json`, ready for `openai-codex/gpt-5.6-luna`.
+- Canonical Pi auth at `~/.pi/agent/auth.json`, ready for `openai-codex/gpt-6-luna`.
 - Network access, or a populated app npm cache, for the first locked SDK installation.
 
 This frontend is Omarchy-specific. It is not a standalone desktop application and does not support arbitrary Wayland compositors.
@@ -124,7 +124,7 @@ From a checkout that will remain at a stable path:
 The installation is idempotent. It:
 
 - validates the model, canonical auth, manifest, and running shell;
-- installs the locked `@earendil-works/pi-coding-agent@0.84.4` SDK under `~/.local/share/word-fixer/sdk/` (or `$XDG_DATA_HOME/word-fixer/sdk/`);
+- installs the locked `@earendil-works/pi-coding-agent@0.87.1` SDK under `~/.local/share/word-fixer/sdk/` (or `$XDG_DATA_HOME/word-fixer/sdk/`);
 - records a dedicated Node executable link in app support state;
 - links the repository as the `hazat.word-fixer` overlay/bar-widget plugin, enables it, and places its status icon in the right bar section;
 - links `linux/bin/word-fixer` into `~/.local/bin/word-fixer`;
@@ -238,10 +238,10 @@ The generated Linux settings select:
 ```json
 {
   "defaultProvider": "openai-codex",
-  "defaultModel": "gpt-5.6-luna",
+  "defaultModel": "gpt-6-luna",
   "defaultThinkingLevel": "off",
   "modelThinkingLevels": {
-    "openai-codex/gpt-5.6-luna": "off"
+    "openai-codex/gpt-6-luna": "off"
   }
 }
 ```
