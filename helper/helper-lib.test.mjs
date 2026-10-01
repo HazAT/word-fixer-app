@@ -165,7 +165,7 @@ test('uses a marker namespace that does not collide with selected text', () => {
   assert.equal(restoreLineBreaks(transport.encodedText, transport), original);
 });
 
-test('rejects missing, reordered, duplicated, unknown, or literal line breaks', () => {
+test('rejects missing, reordered, duplicated, or unknown line-break markers', () => {
   const transport = encodeLineBreaks('one\ntwo\r\nthree');
   const [first, second] = transport.lineBreaks.map(({ marker }) => marker);
 
@@ -182,9 +182,31 @@ test('rejects missing, reordered, duplicated, unknown, or literal line breaks', 
     /unknown/,
   );
   assert.throws(
-    () => restoreLineBreaks(`one${first}two\n${second}three`, transport),
-    /literal line break/,
+    () => restoreLineBreaks('one\ntwo', transport),
+    /removing or reordering/,
   );
+});
+
+test('ignores literal line breaks at the edges or beside markers', () => {
+  const transport = encodeLineBreaks('one\ntwo\r\nthree');
+  const [first, second] = transport.lineBreaks.map(({ marker }) => marker);
+
+  assert.equal(restoreLineBreaks(`\none${first}\ntwo\r\n${second}three\n`, transport), 'one\ntwo\r\nthree');
+  assert.equal(restoreLineBreaks('Fixed text.\n', encodeLineBreaks('Fixd text.')), 'Fixed text.');
+});
+
+test('restores exact originals when every marker comes back as a literal line break', () => {
+  const transport = encodeLineBreaks('\none\r\ntwo\rthree\n');
+
+  assert.equal(restoreLineBreaks('\nOne\ntwo\nthree\n', transport), '\nOne\r\ntwo\rthree\n');
+});
+
+test('keeps line breaks the model added inside the text for review', () => {
+  const transport = encodeLineBreaks('one\ntwo three');
+  const [first] = transport.lineBreaks.map(({ marker }) => marker);
+
+  assert.equal(restoreLineBreaks(`one${first}two\nthree`, transport), 'one\ntwo\nthree');
+  assert.equal(restoreLineBreaks('one two\nthree', encodeLineBreaks('one two three')), 'one two\nthree');
 });
 
 test('fixText preserves boundary, blank, LF, CRLF, and CR breaks', async () => {

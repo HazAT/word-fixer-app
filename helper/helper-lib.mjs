@@ -102,10 +102,21 @@ export function encodeLineBreaks(text) {
   return { encodedText, lineBreaks, markerPrefix };
 }
 
-export function restoreLineBreaks(text, transport) {
-  if (/[\r\n]/.test(text)) {
-    throw new Error('Pi changed the line-break structure by returning a literal line break.');
+export function restoreLineBreaks(rawText, transport) {
+  // A model that rendered every marker as a real line break kept the structure; restore the exact originals in order.
+  if (transport.lineBreaks.length > 0 && !rawText.includes(transport.markerPrefix)) {
+    const literalBreakCount = rawText.match(lineBreakPattern)?.length ?? 0;
+    if (literalBreakCount === transport.lineBreaks.length) {
+      let index = 0;
+      return rawText.replace(lineBreakPattern, () => transport.lineBreaks[index++].lineBreak);
+    }
   }
+
+  // Markers carry the original structure, so literal breaks at the edges or beside a marker are redundant.
+  // Any other literal break is a model-added line, which the review diff shows before it can be applied.
+  const text = rawText
+    .replace(/^[\r\n]+|[\r\n]+$/g, '')
+    .replace(new RegExp(`[\\r\\n]*(${transport.markerPrefix}\\d+⟧)[\\r\\n]*`, 'g'), '$1');
 
   let searchOffset = 0;
   for (const { marker } of transport.lineBreaks) {
