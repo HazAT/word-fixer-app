@@ -50,7 +50,7 @@ async function createHarness(t, { modelAvailable = true, npmAvailable = true } =
   const commandLog = path.join(temporaryRoot, 'commands.log');
   await fs.mkdir(path.join(home, '.pi', 'agent'), { recursive: true });
   await fs.mkdir(stubBin, { recursive: true });
-  await fs.writeFile(path.join(home, '.pi', 'agent', 'auth.json'), '{"openai-codex":"canonical-test-auth"}\n');
+  await fs.writeFile(path.join(home, '.pi', 'agent', 'auth.json'), '{"openai":"canonical-test-auth"}\n');
   await fs.writeFile(stateFile, JSON.stringify({ discovered: false, enabled: false, bar: false }));
 
   await writeExecutable(path.join(stubBin, 'pi'), `#!/usr/bin/env bash
@@ -58,15 +58,15 @@ set -euo pipefail
 printf 'pi %s\\n' "$*" >>"$WF_STUB_LOG"
 if [[ \${1:-} == --list-models ]]; then
   printf 'provider      model         context  max-out  thinking  images\\n'
-  ${modelAvailable ? "printf 'openai-codex  gpt-6-luna  272K     128K     yes       yes\\n'" : ':'}
+  ${modelAvailable ? "printf 'openai  gpt-6-luna  272K     128K     yes       yes\\n'" : ':'}
   exit 0
 fi
 if [[ \${1:-} == auth && \${2:-} == check ]]; then
-  printf '{"status":"ready","provider":"openai-codex","authType":"oauth"}\\n'
+  printf '{"status":"ready","provider":"openai","authType":"oauth"}\\n'
   exit 0
 fi
 if [[ \${1:-} == --version ]]; then
-  printf '0.87.1-test\\n'
+  printf '1.1.0-test\\n'
   exit 0
 fi
 exit 2
@@ -235,10 +235,10 @@ test('an offline second install is idempotent and preserves custom config outsid
   assert.deepEqual(await fs.readFile(path.join(piDirectory, 'NATURAL.md')), customPrompt);
 
   const customSettings = Buffer.from(`{
-  "defaultProvider": "openai-codex",
+  "defaultProvider": "openai",
   "defaultModel": "gpt-6-luna",
   "defaultThinkingLevel": "off",
-  "modelThinkingLevels": {"openai-codex/gpt-6-luna": "off"},
+  "modelThinkingLevels": {"openai/gpt-6-luna": "off"},
   "customMarker": "preserve these bytes"
 }\n`);
   await fs.writeFile(path.join(piDirectory, 'settings.json'), customSettings);
@@ -261,11 +261,11 @@ test('an offline second install is idempotent and preserves custom config outsid
       'pi-coding-agent',
       'package.json',
     ), 'utf8')).version,
-    '0.87.1',
+    '1.1.0',
   );
   assert.equal(await fs.readlink(path.join(harness.dataDirectory, 'bin', 'node')), process.execPath);
   const settings = JSON.parse(customSettings);
-  assert.equal(settings.defaultProvider, 'openai-codex');
+  assert.equal(settings.defaultProvider, 'openai');
   assert.equal(settings.defaultModel, 'gpt-6-luna');
   assert.equal(settings.defaultThinkingLevel, 'off');
   assert.equal(await fs.readlink(path.join(harness.home, '.config', 'omarchy', 'plugins', 'hazat.word-fixer')), repositoryRoot);
@@ -288,7 +288,7 @@ test('an offline second install is idempotent and preserves custom config outsid
   assert.equal(await fs.access(path.join(repositoryRoot, 'helper', 'node_modules')).then(() => true, () => false), false);
 });
 
-test('stale settings and a dangling Node link from an earlier install are refreshed', async (t) => {
+test('legacy provider settings for gpt-6-luna and a dangling Node link are refreshed', async (t) => {
   const harness = await createHarness(t);
   const piDirectory = path.join(harness.home, '.config', 'word-fixer', '.pi');
   const nodeLink = path.join(harness.dataDirectory, 'bin', 'node');
@@ -297,9 +297,9 @@ test('stale settings and a dangling Node link from an earlier install are refres
   await fs.symlink(path.join(harness.home, 'removed-node-version', 'bin', 'node'), nodeLink);
   await fs.writeFile(path.join(piDirectory, 'settings.json'), `{
   "defaultProvider": "openai-codex",
-  "defaultModel": "gpt-5.4-mini",
+  "defaultModel": "gpt-6-luna",
   "defaultThinkingLevel": "off",
-  "modelThinkingLevels": {"openai-codex/gpt-5.4-mini": "off"}
+  "modelThinkingLevels": {"openai-codex/gpt-6-luna": "off"}
 }\n`);
 
   const install = runInstaller(harness);
@@ -332,9 +332,11 @@ test('missing command and unavailable dedicated model fail before installation m
   const prerequisiteBin = path.join(emptyHome, 'bin');
   await fs.mkdir(prerequisiteBin);
   await fs.symlink(process.execPath, path.join(prerequisiteBin, 'node'));
+  await fs.symlink('/bin/bash', path.join(prerequisiteBin, 'bash'));
+  await fs.symlink('/usr/bin/dirname', path.join(prerequisiteBin, 'dirname'));
   const missingCommand = spawnSync(installer, [], {
     cwd: repositoryRoot,
-    env: { HOME: emptyHome, PATH: `${prerequisiteBin}:/usr/bin:/bin` },
+    env: { HOME: emptyHome, PATH: prerequisiteBin },
     encoding: 'utf8',
   });
   assert.notEqual(missingCommand.status, 0);
@@ -345,6 +347,6 @@ test('missing command and unavailable dedicated model fail before installation m
   const before = await snapshotTree(harness.home);
   const missingModel = runInstaller(harness);
   assert.notEqual(missingModel.status, 0);
-  assert.match(missingModel.stderr, /required model openai-codex\/gpt-6-luna is unavailable; no fallback model will be used/);
+  assert.match(missingModel.stderr, /required model openai\/gpt-6-luna is unavailable; no fallback model will be used/);
   assert.deepEqual(await snapshotTree(harness.home), before);
 });

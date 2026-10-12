@@ -475,6 +475,22 @@ test('caller cancellation aborts and disposes all three active sessions', async 
   assert.equal(sessions.reduce((total, session) => total + session.disposed, 0), 3);
 });
 
+test('requires the exact OpenAI review model before creating sessions', async () => {
+  assert.deepEqual(REVIEW_MODEL, { provider: 'openai', id: 'gpt-6-luna' });
+  for (const model of [
+    { provider: 'another-provider', id: 'gpt-6-luna' },
+    { provider: 'openai', id: 'another-model' },
+  ]) {
+    const { services, sessions } = reviewServices();
+    services.model = model;
+    await assert.rejects(
+      reviewText({ services, text: 'Text to review', cwd: '/tmp', log: { async log() {} } }),
+      /Required model openai\/gpt-6-luna is unavailable/,
+    );
+    assert.equal(sessions.length, 0);
+  }
+});
+
 test('rejects model fallback and disposes every fresh session', async () => {
   const { services, sessions } = reviewServices({ modelFallbackMessage: 'using another model' });
 
