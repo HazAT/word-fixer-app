@@ -58,14 +58,17 @@ const system = new LinuxSystem();
 const eventDetails = { status: 'failed', durationMs: 0 };
 const started = Date.now();
 let duplicate = false;
+let enteredReview = false;
 try {
   const source = parseArguments(process.argv.slice(2));
+  const completionTimeoutMs = configuredTimeout();
+  enteredReview = true;
   const result = await executeWordFixer({
     ...source,
     eventDetails,
     system,
     signal: controller.signal,
-    completionTimeoutMs: configuredTimeout(),
+    completionTimeoutMs,
     acquireRuntime: () => acquireRequestRuntime(),
   });
   if (['source-lost', 'refocus-failed', 'target-mismatch'].includes(result.status)) {
@@ -83,7 +86,7 @@ try {
   process.stderr.write(`word-fixer: ${message}\n`);
   process.exitCode = 1;
 } finally {
-  if (!duplicate) {
+  if (enteredReview && !duplicate) {
     const config = await loadWordFixerConfig().catch(() => ({}));
     const dataDir = resolveDataDir();
     const log = createLogger({ debugEnabled: config.debugLogging === true || process.env.WORD_FIXER_DEBUG === '1', logFile: path.join(dataDir, 'debug.log') });

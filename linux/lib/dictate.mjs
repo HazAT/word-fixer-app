@@ -34,12 +34,19 @@ export async function executeDictation({ input, env = {}, argv = [], config = {}
     const work = async () => {
       details.input = await input;
       validateDictationInput(details.input);
-      return system.dictate(details.input, { context: env.VOXTYPE_CONTEXT, signal: controller.signal });
+      const result = await system.dictate(details.input, { context: env.VOXTYPE_CONTEXT, signal: controller.signal });
+      if (controller.signal.aborted) throw controller.signal.reason;
+      if (typeof result.text !== 'string' || !result.text.trim()) throw new Error('Helper returned empty dictation text.');
+      details.llm = { durationMs: result.durationMs ?? null, cost: result.cost ?? null };
+      details.guard = assessDictation(details.input, result.text, { maxEditRatio });
+      if (clock() - startedAt >= timeoutMs) {
+        const error = new Error(`Dictation timed out after ${timeoutMs}ms.`);
+        controller.abort(error);
+        throw error;
+      }
+      return result;
     };
     const result = await Promise.race([work(), deadline]);
-    if (typeof result.text !== 'string' || !result.text.trim()) throw new Error('Helper returned empty dictation text.');
-    details.llm = { durationMs: result.durationMs ?? null, cost: result.cost ?? null };
-    details.guard = assessDictation(details.input, result.text, { maxEditRatio });
     if (!details.guard.accepted) {
       details.outcome = 'rejected';
       details.error = 'Dictation rejected by the transcript guard.';

@@ -515,6 +515,9 @@ export function validateDictationInput(text) {
 }
 
 export function assessDictation(input, output, { maxEditRatio = 0.5 } = {}) {
+  if (output.length > input.length * 1.5 + 20) {
+    return { editRatio: null, accepted: false, unchanged: false };
+  }
   const normalize = (text) => text.toLowerCase().replace(/\s+/g, ' ').trim();
   const left = normalize(input);
   const right = normalize(output);
@@ -534,7 +537,7 @@ export function assessDictation(input, output, { maxEditRatio = 0.5 } = {}) {
   const ratio = previous[right.length] / Math.max(1, left.length);
   return {
     editRatio: Math.round(ratio * 1000) / 1000,
-    accepted: ratio <= maxEditRatio && output.length <= input.length * 1.5 + 20,
+    accepted: ratio <= maxEditRatio,
     unchanged: output === input,
   };
 }

@@ -42,6 +42,35 @@ test('helper failure, malformed output and invalid input fail without stdout', a
   }
 });
 
+test('late oversized helper output rejects within the whole dictation deadline', async () => {
+  const started = Date.now();
+  const timeoutMs = 200;
+  const result = await executeDictation({
+    input: 'x'.repeat(8192),
+    config: { dictation: { timeoutMs } },
+    system: { async dictate() {
+      await new Promise(resolve => setTimeout(resolve, 150));
+      return { text: 'y'.repeat(256 * 1024) };
+    } },
+  });
+  assert.equal(result.exitCode, 3);
+  assert.equal(result.stdout, '');
+  assert.equal(result.details.outcome, 'rejected');
+  assert.deepEqual(result.details.guard, { editRatio: null, accepted: false, unchanged: false });
+  assert.ok(Date.now() - started < timeoutMs + 1000);
+});
+
+test('guard assessment remains inside the deadline', async () => {
+  let calls = 0;
+  const result = await executeDictation({
+    input, system, config: { dictation: { timeoutMs: 200 } },
+    clock: () => ++calls < 3 ? 0 : 201,
+  });
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.stdout, '');
+  assert.match(result.stderr, /timed out/);
+});
+
 test('deadline covers helper startup/request and even a stalled stdin', async () => {
   let aborted = false;
   for (const options of [

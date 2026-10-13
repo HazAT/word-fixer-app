@@ -53,6 +53,14 @@ test('opt-in log uses 0600; defaults write nothing; invalid command logs once', 
   await emitEvent({}, { config: { eventCommand: [] }, log: { log: () => assert.fail('debug disabled') } });
 });
 
+test('whole emission caps a never-completing log append at 1000 ms', async (t) => {
+  t.mock.method(fs, 'appendFile', () => new Promise(() => {}));
+  const started = Date.now();
+  await emitEvent({ input: 'Transcript' }, { config: { eventLog: true }, dataDir: os.tmpdir() });
+  const duration = Date.now() - started;
+  assert.ok(duration >= 900 && duration < 1500);
+});
+
 test('hook stdin is capped at 1000 ms and emission never rejects', async () => {
   const started = Date.now();
   await emitEvent({ input: 'x'.repeat(2 * 1024 * 1024) }, { config: { eventCommand: [process.execPath, '-e', 'setTimeout(() => {}, 1200)'] } });
@@ -99,4 +107,38 @@ test('real CLI hook receives one event; slow and failing hooks preserve stdout a
   assert.equal(event.dictation.source, 'voxtype');
   assert.equal(event.outcome, 'unchanged');
   assert.equal(await fs.stat(path.join(dir, 'events.jsonl')).catch(() => null), null);
+  await t.test('stalled FIFO log cannot delay CLI exit beyond the whole emission cap', async () => {
+    await new Promise((resolve, reject) => execFile('mkfifo', [path.join(dir, 'events.jsonl')], error => error ? reject(error) : resolve()));
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ eventLog: true, nodeBinaryPath: process.execPath }));
+    const started = Date.now();
+    const result = await new Promise((resolve, reject) => {
+      const child = execFile(process.execPath, ['linux/bin/word-fixer-dictate'], { env: { ...process.env, WORD_FIXER_CONFIG_DIR: dir, WORD_FIXER_DATA_DIR: dir }, timeout: 1500 }, (error, stdout, stderr) => error ? reject(error) : resolve({ stdout, stderr }));
+      child.stdin.end('Transcript');
+    });
+    assert.equal(result.stdout, 'Transcript');
+    assert.equal(result.stderr, '');
+    assert.ok(Date.now() - started < 1500);
+  });
+});
+
+test('argument and environment validation errors do not emit review events', async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'wf-events-usage-'));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const hookOutput = path.join(dir, 'hook-output');
+  await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({
+    eventLog: true,
+    eventCommand: [process.execPath, '-e', `require('node:fs').writeFileSync(process.argv[1], 'invoked')`, hookOutput],
+  }));
+  await fs.writeFile(path.join(dir, 'notify-send'), '#!/bin/sh\nexit 0\n', { mode: 0o700 });
+  for (const argv of [[], ['--source-address', '0x123', '--source-pid', '123', '--source-terminal', 'false']]) {
+    const result = await new Promise(resolve => execFile(process.execPath, ['linux/bin/word-fixer', ...argv], {
+      env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, WORD_FIXER_CONFIG_DIR: dir, WORD_FIXER_DATA_DIR: dir, WORD_FIXER_COMPLETION_TIMEOUT_MS: 'invalid' }, timeout: 1500,
+    }, (error, stdout, stderr) => resolve({ error, stdout, stderr })));
+    assert.equal(result.error?.code, 1);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, argv.length ? /TIMEOUT_MS is invalid/ : /Usage: word-fixer/);
+  }
+  await new Promise(resolve => setTimeout(resolve, 100));
+  assert.equal(await fs.stat(path.join(dir, 'events.jsonl')).catch(() => null), null);
+  assert.equal(await fs.stat(hookOutput).catch(() => null), null);
 });
