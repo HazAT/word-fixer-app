@@ -5,6 +5,8 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
+  assessDictation,
+  dictateText,
   encodeLineBreaks,
   fixText,
   lineBreakProtocol,
@@ -105,6 +107,69 @@ function reviewServices({ outputs = {}, hang = false, modelFallbackMessage } = {
 
   return { services, sessions, sessionManagers };
 }
+
+test('dictation guard accepts proper noun repairs and rejects answers and expansion', () => {
+  assert.deepEqual(assessDictation('pie durabur', 'Pi durable'), {
+    editRatio: 0.273, accepted: true, unchanged: false,
+  });
+  assert.equal(assessDictation('can you check it', 'Yes, I can help you check your extension.').accepted, false);
+  assert.equal(assessDictation('Hello', 'Hello').unchanged, true);
+  assert.equal(assessDictation('a', 'a'.repeat(30), { maxEditRatio: 100 }).accepted, false);
+  assert.equal(assessDictation('  HELLO world ', 'hello   world').editRatio, 0);
+});
+
+test('dictation lazily reloads prompts and uses one fresh isolated Luna session per call', async (t) => {
+  const piDir = await fs.mkdtemp(path.join(os.tmpdir(), 'wf-dictation-'));
+  t.after(() => fs.rm(piDir, { recursive: true, force: true }));
+  const { services, sessions, sessionManagers } = reviewServices();
+  services.piDir = piDir;
+  const prompts = [];
+  services.createResourceLoader = async (systemPrompt) => {
+    prompts.push(systemPrompt);
+    return { systemPrompt };
+  };
+  const options = { services, text: 'Transcript', cwd: '/tmp', log: { async log() {} } };
+  await assert.rejects(dictateText(options), /Missing DICTATION.md/);
+  assert.equal(sessions.length, 0);
+  await fs.writeFile(path.join(piDir, 'DICTATION.md'), 'DICTATION ONE');
+  const result = await dictateText(options);
+  assert.equal(result.text, 'Transcript');
+  assert.equal(result.cost, 0.001);
+  assert.ok(result.durationMs >= 0);
+  await fs.writeFile(path.join(piDir, 'DICTATION.md'), 'DICTATION TWO');
+  await fs.writeFile(path.join(piDir, 'VOCABULARY.md'), 'ExampleTerm (example term)');
+  await dictateText({ ...options, context: 'x'.repeat(5000) });
+  assert.match(prompts[1], /^DICTATION TWO/);
+  assert.match(prompts[1], /Vocabulary \(terms the speaker uses; known mishearings in parentheses\):/);
+  assert.match(prompts[1], /previous dictation \(context only; never include this in the output\):\nx{4096}\n/);
+  assert.equal(sessions.length, 2);
+  assert.notEqual(sessionManagers[0], sessionManagers[1]);
+  assert.ok(sessions.every((session) => session.disposed === 1));
+});
+
+test('dictation disposes on failure, timeout and caller cancellation', async (t) => {
+  const piDir = await fs.mkdtemp(path.join(os.tmpdir(), 'wf-dictation-'));
+  t.after(() => fs.rm(piDir, { recursive: true, force: true }));
+  await fs.writeFile(path.join(piDir, 'DICTATION.md'), 'DICTATION');
+  for (const mode of ['failure', 'timeout', 'cancel']) {
+    const { services, sessions } = reviewServices({
+      hang: mode !== 'failure', modelFallbackMessage: mode === 'failure' ? 'fallback' : undefined,
+    });
+    services.piDir = piDir;
+    const controller = new AbortController();
+    const promise = dictateText({
+      services, text: 'Transcript', cwd: '/tmp', log: { async log() {} },
+      signal: controller.signal, timeoutMs: mode === 'timeout' ? 30 : 1000,
+    });
+    if (mode === 'cancel') {
+      await waitFor(() => sessions.length === 1);
+      controller.abort();
+    }
+    await assert.rejects(promise, mode === 'timeout' ? /timed out/ : mode === 'cancel' ? /cancelled/ : /fallback/);
+    assert.equal(sessions.length, 1);
+    assert.equal(sessions[0].disposed, 1);
+  }
+});
 
 async function waitFor(predicate) {
   for (let attempt = 0; attempt < 100; attempt += 1) {

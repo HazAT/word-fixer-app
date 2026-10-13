@@ -303,7 +303,7 @@ check_installation() {
   fi
 
   local prompt_name
-  for prompt_name in SYSTEM NATURAL FEEDBACK; do
+  for prompt_name in SYSTEM NATURAL FEEDBACK DICTATION; do
     if [[ -s $PI_DIR/$prompt_name.md ]]; then
       ok "prompt: $PI_DIR/$prompt_name.md"
     else
@@ -339,6 +339,13 @@ check_installation() {
     missing "discoverable client link: $CLIENT_LINK" || failures=$((failures + 1))
   fi
 
+  if link_matches "$BIN_HOME/word-fixer-dictate" "$ROOT/linux/bin/word-fixer-dictate" \
+      && [[ $(command -v word-fixer-dictate 2>/dev/null || true) == "$BIN_HOME/word-fixer-dictate" ]]; then
+    ok "discoverable dictation client: $BIN_HOME/word-fixer-dictate"
+  else
+    missing "discoverable dictation client link: $BIN_HOME/word-fixer-dictate" || failures=$((failures + 1))
+  fi
+
   if [[ -e $PI_DIR/auth.json || -L $PI_DIR/auth.json ]]; then
     missing "app-local credentials must not exist: $PI_DIR/auth.json" || failures=$((failures + 1))
   else
@@ -370,9 +377,11 @@ ensure_link "$NODE_COMMAND" "$SUPPORT_BIN_DIR/node" "Node runtime executable"
 seed_file "$ROOT/shared/prompts/SYSTEM.md" "$PI_DIR/SYSTEM.md"
 seed_file "$ROOT/shared/prompts/NATURAL.md" "$PI_DIR/NATURAL.md"
 seed_file "$ROOT/shared/prompts/FEEDBACK.md" "$PI_DIR/FEEDBACK.md"
+seed_file "$ROOT/shared/prompts/DICTATION.md" "$PI_DIR/DICTATION.md"
 seed_settings
 write_config
 ensure_link "$ROOT/linux/bin/word-fixer" "$CLIENT_LINK" "Word Fixer client"
+ensure_link "$ROOT/linux/bin/word-fixer-dictate" "$BIN_HOME/word-fixer-dictate" "Word Fixer dictation client"
 install_plugin
 
 check_installation

@@ -1,9 +1,12 @@
 #!/usr/bin/env node
+import fs from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
 import process from 'node:process';
 import {
   createLogger,
+  dictateText,
+  DEFAULT_DICTATION_TIMEOUT_MS,
   DEFAULT_REVIEW_TIMEOUT_MS,
   loadPiServices,
   loadWordFixerConfig,
@@ -15,12 +18,17 @@ import {
 } from './helper-lib.mjs';
 
 const apiVersion = 3;
-const idleTimeoutMs = Number(process.env.WORD_FIXER_HELPER_IDLE_MS ?? 120000);
+const features = ['dictate', 'prewarm'];
 const reviewTimeoutMs = Number(process.env.WORD_FIXER_HELPER_REVIEW_MS ?? DEFAULT_REVIEW_TIMEOUT_MS);
 const maximumBodyBytes = (MAX_REVIEW_INPUT_BYTES * 6) + 1024;
 const cwd = process.env.WORD_FIXER_HELPER_CWD || process.cwd();
 
 const config = await loadWordFixerConfig();
+const idleTimeoutMs = Number(process.env.WORD_FIXER_HELPER_IDLE_MS ?? config.helperIdleTimeoutMs ?? 120000);
+if (!Number.isSafeInteger(idleTimeoutMs) || idleTimeoutMs <= 0) {
+  throw new Error('Helper idle timeout must be a positive safe integer.');
+}
+const dictationTimeoutMs = config.dictation?.timeoutMs ?? DEFAULT_DICTATION_TIMEOUT_MS;
 const debugEnabled = process.env.WORD_FIXER_DEBUG === '1' || config.debugLogging === true;
 const logger = createLogger({
   debugEnabled,
@@ -102,7 +110,12 @@ async function shutdown(reason) {
   if (server) {
     await new Promise((resolve) => server.close(resolve));
   }
-  await removeFileIfPresent(helperStatePath);
+  try {
+    const state = JSON.parse(await fs.readFile(helperStatePath, 'utf8'));
+    if (state.pid === process.pid) await removeFileIfPresent(helperStatePath);
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
   process.exit(0);
 }
 
@@ -126,7 +139,7 @@ async function handleRequest(request, response) {
 
   try {
     if (request.url === '/health') {
-      sendJson(response, 200, { ok: true, ready: true, pid: process.pid, apiVersion });
+      sendJson(response, 200, { ok: true, ready: true, pid: process.pid, apiVersion, features });
       return;
     }
 
@@ -135,6 +148,26 @@ async function handleRequest(request, response) {
       queueMicrotask(() => {
         void shutdown('http_shutdown');
       });
+      return;
+    }
+
+    if (request.url === '/prewarm') {
+      await ensureServices();
+      sendJson(response, 200, { ok: true });
+      return;
+    }
+
+    if (request.url === '/dictate') {
+      const body = await readJsonBody(request);
+      const result = await dictateText({
+        services: await ensureServices(), text: body?.text, context: body?.context,
+        cwd, log: logger, signal: controller.signal, timeoutMs: dictationTimeoutMs,
+      });
+      await logger.log('dictate complete', {
+        inputLength: body.text.length, outputLength: result.text.length,
+        durationMs: result.durationMs, cost: result.cost,
+      });
+      sendJson(response, 200, { ok: true, ...result });
       return;
     }
 
@@ -195,6 +228,7 @@ await writeJsonFile(helperStatePath, {
   pid: process.pid,
   port: address.port,
   apiVersion,
+  features,
 });
 await logger.log('listening', {
   pid: process.pid,

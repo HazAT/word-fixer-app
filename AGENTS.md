@@ -47,11 +47,20 @@ Run correction, natural rewrite, and takeaway concurrently. Do not add model fal
 
 The locked `@earendil-works/pi-coding-agent` SDK belongs under `~/.local/share/word-fixer/sdk/` (or `$XDG_DATA_HOME/word-fixer/sdk/`), never in checkout `node_modules` or a global package. Prompts and app Pi settings belong under `~/.config/word-fixer/.pi/`. Authentication remains canonical at `~/.pi/agent/auth.json`.
 
+### Linux dictation
+
+`word-fixer-dictate` transforms stdin to one repaired transcript on stdout; Voxtype owns paste. This is the explicitly supported exception to no auto-paste without review, not a clipboard or capture path. Use one fresh in-memory `openai/gpt-6-luna` session, thinking off, no tools, disposed on every path. Every failure or guard rejection has empty stdout and non-zero exit so Voxtype uses raw text. No review lock, notifications, model fallback or macOS dictation.
+
+Helper API remains v3 with additive `features: ["dictate", "prewarm"]` in health and helper state. Reviews require only a healthy v3 helper; dictation/prewarm also require the corresponding feature, retiring verified featureless v3 helpers under the startup lock. Do not change Swift or weaken macOS capture/apply behavior.
+
+Load `DICTATION.md` and optional user `VOCABULARY.md` lazily on every call, never in `loadPiServices`. The macOS installer does not seed the dictation prompt. Linux installers seed only missing `DICTATION.md` and never create or modify vocabulary.
+
 ## Configuration and generated state
 
 ```text
 ~/.config/word-fixer/config.json
-~/.config/word-fixer/.pi/{SYSTEM,NATURAL,FEEDBACK}.md
+~/.config/word-fixer/.pi/{SYSTEM,NATURAL,FEEDBACK,DICTATION}.md
+~/.config/word-fixer/.pi/VOCABULARY.md (optional, user-owned)
 ~/.config/word-fixer/.pi/settings.json
 ~/.pi/agent/auth.json
 
@@ -61,6 +70,8 @@ The locked `@earendil-works/pi-coding-agent` SDK belongs under `~/.local/share/w
 ~/.local/share/word-fixer/debug.log
 ${XDG_RUNTIME_DIR:-/tmp}/word-fixer/
 ```
+
+Optional config keys: `helperIdleTimeoutMs` (positive integer, default 120000), `dictation.timeoutMs` (positive integer, default 8000), `dictation.maxEditRatio` (non-negative finite number, default 0.5). `WORD_FIXER_HELPER_IDLE_MS` overrides configured idle timeout. `WORD_FIXER_CONFIG_DIR` and `WORD_FIXER_DATA_DIR` override XDG paths; `VOXTYPE_CONTEXT` provides previous dictation context, clamped to 4 KiB.
 
 Platform installers seed only missing prompts and settings. Never overwrite user prompt customization. Runtime helper state, logs, sockets, locks, requests, installed dependencies, and credentials must remain untracked.
 
@@ -89,6 +100,8 @@ Platform installers seed only missing prompts and settings. Never overwrite user
 - `manifest.json` — schema-v1 `hazat.word-fixer` overlay and bar-widget plugin.
 - `linux/install` — idempotent install and non-destructive `--check`.
 - `linux/bin/word-fixer` — single-instance client entry point.
+- `linux/bin/word-fixer-dictate`, `linux/lib/dictate.mjs` — bounded stdin/stdout dictation, guard and detached prewarm.
+- `shared/prompts/DICTATION.md` — transcript-only repair contract.
 - `linux/hypr/word-fixer.lua` — source capture and deferred external-client launch only; no clipboard or input injection.
 - `linux/lib/orchestrator.mjs` — loading/review/error flow and safe paste-back.
 - `linux/lib/system.mjs` — process, helper, clipboard, shell, focus, and notification integration.
@@ -104,7 +117,7 @@ Platform installers seed only missing prompts and settings. Never overwrite user
 
 ```bash
 node --test helper/helper-lib.test.mjs linux/test/*.test.mjs
-for file in helper/helper-lib.mjs helper/sdk-loader.mjs helper/word-fixer-helper.mjs linux/bin/word-fixer linux/lib/*.mjs; do node --check "$file"; done
+for file in helper/helper-lib.mjs helper/sdk-loader.mjs helper/word-fixer-helper.mjs linux/bin/word-fixer linux/bin/word-fixer-dictate linux/lib/*.mjs; do node --check "$file"; done
 bash -n linux/install
 luac -p linux/hypr/word-fixer.lua
 omarchy plugin validate "$PWD"
@@ -148,4 +161,4 @@ Install and launch `~/Applications/Word Fixer.app`, verify helper prewarm from `
 
 ## Supported scope
 
-Do not claim or add non-Omarchy compositor support, a standalone Linux GUI, auto-paste without review, rich clipboard restoration, settings UI, model selection, history, or persistent sessions unless explicitly requested.
+Do not claim or add non-Omarchy compositor support, a standalone Linux GUI, auto-paste without review (except Voxtype-owned dictation paste above), rich clipboard restoration, settings UI, model selection, history, or persistent sessions unless explicitly requested.

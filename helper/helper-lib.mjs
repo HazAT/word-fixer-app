@@ -503,6 +503,84 @@ export async function reviewText({
   }
 }
 
+export const DEFAULT_DICTATION_TIMEOUT_MS = 8_000;
+export const MAX_DICTATION_INPUT_BYTES = 8 * 1024;
+
+export function validateDictationInput(text) {
+  validateReviewInput(text);
+  if (textByteLength(text) > MAX_DICTATION_INPUT_BYTES) {
+    throw new ReviewInputError(`Dictation text exceeds the ${MAX_DICTATION_INPUT_BYTES}-byte limit.`);
+  }
+  return text;
+}
+
+export function assessDictation(input, output, { maxEditRatio = 0.5 } = {}) {
+  const normalize = (text) => text.toLowerCase().replace(/\s+/g, ' ').trim();
+  const left = normalize(input);
+  const right = normalize(output);
+  let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  let current = new Array(right.length + 1);
+  for (let row = 1; row <= left.length; row += 1) {
+    current[0] = row;
+    for (let column = 1; column <= right.length; column += 1) {
+      current[column] = Math.min(
+        current[column - 1] + 1,
+        previous[column] + 1,
+        previous[column - 1] + (left[row - 1] === right[column - 1] ? 0 : 1),
+      );
+    }
+    [previous, current] = [current, previous];
+  }
+  const ratio = previous[right.length] / Math.max(1, left.length);
+  return {
+    editRatio: Math.round(ratio * 1000) / 1000,
+    accepted: ratio <= maxEditRatio && output.length <= input.length * 1.5 + 20,
+    unchanged: output === input,
+  };
+}
+
+export async function dictateText({
+  services, text, context, cwd, log, signal, timeoutMs = DEFAULT_DICTATION_TIMEOUT_MS,
+}) {
+  validateDictationInput(text);
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
+    throw new ReviewInputError('Dictation timeout must be a positive integer number of milliseconds.');
+  }
+  const startedAt = Date.now();
+  const controller = new AbortController();
+  const cancel = () => controller.abort(new ReviewCancelledError());
+  if (signal?.aborted) cancel();
+  else signal?.addEventListener('abort', cancel, { once: true });
+  const timeout = setTimeout(() => controller.abort(new ReviewTimeoutError(timeoutMs)), timeoutMs);
+  try {
+    let prompt;
+    try {
+      prompt = await raceWithAbort(fs.readFile(path.join(services.piDir, 'DICTATION.md'), 'utf8'), controller.signal);
+    } catch (error) {
+      if (error.code === 'ENOENT') throw new Error('Missing DICTATION.md. Run the Word Fixer installer again.');
+      throw error;
+    }
+    try {
+      const vocabulary = await raceWithAbort(fs.readFile(path.join(services.piDir, 'VOCABULARY.md'), 'utf8'), controller.signal);
+      prompt += `\n\nVocabulary (terms the speaker uses; known mishearings in parentheses):\n${vocabulary}`;
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+    if (typeof context === 'string' && context.trim()) {
+      let clamped = Buffer.from(context, 'utf8').subarray(0, 4096).toString('utf8');
+      while (Buffer.byteLength(clamped, 'utf8') > 4096) clamped = clamped.slice(0, -1);
+      prompt += `\n\nSpeaker's previous dictation (context only; never include this in the output):\n${clamped}`;
+    }
+    const result = await runTextTask({
+      services, text, cwd, log, systemPrompt: prompt, preserveLineBreaks: true, signal: controller.signal,
+    });
+    return { ...result, durationMs: Date.now() - startedAt };
+  } finally {
+    clearTimeout(timeout);
+    signal?.removeEventListener('abort', cancel);
+  }
+}
+
 export async function writeJsonFile(filePath, value) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   await fs.writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');

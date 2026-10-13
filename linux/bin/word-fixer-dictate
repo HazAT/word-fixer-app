@@ -1,0 +1,42 @@
+#!/usr/bin/env node
+import process from 'node:process';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { loadWordFixerConfig, MAX_DICTATION_INPUT_BYTES } from '../../helper/helper-lib.mjs';
+import { executeDictation } from '../lib/dictate.mjs';
+import { HelperClient } from '../lib/system.mjs';
+
+const argv = process.argv.slice(2);
+if (argv.length === 1 && argv[0] === '--prewarm') {
+  const child = spawn(process.execPath, [fileURLToPath(import.meta.url), '--prewarm-worker'], {
+    detached: true, stdio: 'ignore', shell: false,
+  });
+  child.on('error', () => {});
+  child.unref();
+} else {
+  try {
+    const config = await loadWordFixerConfig();
+    const helper = new HelperClient({ dictationTimeoutMs: config.dictation?.timeoutMs ?? 8_000 });
+    if (argv.length === 1 && argv[0] === '--prewarm-worker') {
+      await helper.prewarm();
+    } else {
+      const input = (async () => {
+        const chunks = [];
+        let bytes = 0;
+        for await (const chunk of process.stdin) {
+          bytes += chunk.length;
+          if (bytes > MAX_DICTATION_INPUT_BYTES) throw new Error('Dictation stdin exceeds the 8192-byte limit.');
+          chunks.push(chunk);
+        }
+        return Buffer.concat(chunks).toString('utf8');
+      })();
+      const result = await executeDictation({ input, env: process.env, argv, config, system: helper });
+      if (result.stderr) await new Promise((resolve) => process.stderr.write(result.stderr, resolve));
+      if (result.stdout) await new Promise((resolve) => process.stdout.write(result.stdout, resolve));
+      process.exit(result.exitCode);
+    }
+  } catch (error) {
+    process.stderr.write(`${String(error?.message ?? error).replace(/[\r\n]+/g, ' ')}\n`);
+    process.exitCode = 1;
+  }
+}

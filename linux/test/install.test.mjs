@@ -213,6 +213,9 @@ test('check mode is clear and non-destructive before and after installation', as
   const install = runInstaller(harness);
   assert.equal(install.status, 0, install.stderr);
   assert.match(install.stdout, /Word Fixer installation check passed/);
+  assert.deepEqual(await fs.readFile(path.join(piDirectory, 'DICTATION.md')),
+    await fs.readFile(path.join(repositoryRoot, 'shared', 'prompts', 'DICTATION.md')));
+  assert.equal(await fs.access(path.join(piDirectory, 'VOCABULARY.md')).then(() => true, () => false), false);
   const installedSnapshot = await snapshotTree(harness.home);
 
   const check = runInstaller(harness, ['--check']);
@@ -220,6 +223,8 @@ test('check mode is clear and non-destructive before and after installation', as
   assert.match(check.stdout, /plugin enablement: hazat\.word-fixer \(overlay and bar widget\)/);
   assert.match(check.stdout, /bar status icon: hazat\.word-fixer/);
   assert.match(check.stdout, /auth remains canonical only/);
+  assert.match(check.stdout, /prompt: .*DICTATION.md/);
+  assert.match(check.stdout, /discoverable dictation client: .*word-fixer-dictate/);
   assert.deepEqual(await snapshotTree(harness.home), installedSnapshot);
 });
 
@@ -242,11 +247,17 @@ test('an offline second install is idempotent and preserves custom config outsid
   "customMarker": "preserve these bytes"
 }\n`);
   await fs.writeFile(path.join(piDirectory, 'settings.json'), customSettings);
+  await fs.writeFile(path.join(piDirectory, 'DICTATION.md'), customPrompt);
+  await fs.writeFile(path.join(piDirectory, 'VOCABULARY.md'), customPrompt);
   harness.env.WF_STUB_NPM_INSTALL_DISABLED = '1';
   const secondInstall = runInstaller(harness);
   assert.equal(secondInstall.status, 0, secondInstall.stderr);
   assert.deepEqual(await fs.readFile(path.join(piDirectory, 'NATURAL.md')), customPrompt);
   assert.deepEqual(await fs.readFile(path.join(piDirectory, 'settings.json')), customSettings);
+  assert.deepEqual(await fs.readFile(path.join(piDirectory, 'DICTATION.md')), customPrompt);
+  assert.deepEqual(await fs.readFile(path.join(piDirectory, 'VOCABULARY.md')), customPrompt);
+  assert.equal(await fs.readlink(path.join(harness.binHome, 'word-fixer-dictate')),
+    path.join(repositoryRoot, 'linux', 'bin', 'word-fixer-dictate'));
 
   const configDirectory = path.join(harness.home, '.config', 'word-fixer');
   const config = JSON.parse(await fs.readFile(path.join(configDirectory, 'config.json'), 'utf8'));

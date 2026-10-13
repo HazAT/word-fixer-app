@@ -354,20 +354,22 @@ test('abort during completion wait hides the overlay and cleans request state', 
   assert.deepEqual(system.pastes, []);
 });
 
-test('helper client reuses a healthy API-v3 helper and preserves request text in HTTP body', async (t) => {
+test('helper client reviews with featureless API-v3 and uses additive dictation features and preserves request text in HTTP body', async (t) => {
   const configDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'word-fixer-helper-client-'));
   t.after(() => fs.rm(configDirectory, { recursive: true, force: true }));
   const requests = [];
+  let features;
   const server = http.createServer(async (request, response) => {
     const chunks = [];
     for await (const chunk of request) chunks.push(chunk);
     requests.push({ url: request.url, body: JSON.parse(Buffer.concat(chunks).toString('utf8')) });
     response.setHeader('content-type', 'application/json');
     if (request.url === '/health') {
-      response.end(JSON.stringify({ ok: true, ready: true, pid: process.pid, apiVersion: 3 }));
+      response.end(JSON.stringify({ ok: true, ready: true, pid: process.pid, apiVersion: 3, features }));
     } else {
       response.end(JSON.stringify({
         ok: true,
+        text: 'Dictated', cost: 0.001, durationMs: 10,
         correction: 'Light',
         natural: 'Natural',
         takeaway: 'Tip',
@@ -390,6 +392,40 @@ test('helper client reuses a healthy API-v3 helper and preserves request text in
   assert.equal(review.natural, 'Natural');
   assert.deepEqual(requests.map(({ url }) => url), ['/health', '/review']);
   assert.equal(requests[1].body.text, text);
+  features = ['dictate', 'prewarm'];
+  await fs.writeFile(path.join(configDirectory, 'helper.json'),
+    JSON.stringify({ pid: process.pid, port, apiVersion: 3, features }));
+  assert.deepEqual(await helper.dictate(text, { context: 'previous' }), {
+    text: 'Dictated', cost: 0.001, durationMs: 10,
+  });
+  await helper.prewarm();
+  assert.deepEqual(requests.slice(2).map(({ url }) => url), ['/health', '/dictate', '/health', '/prewarm']);
+  assert.deepEqual(requests[3].body, { text, context: 'previous' });
+});
+
+test('helper client retires a verified v3 helper missing required features', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'word-fixer-helper-upgrade-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  let features = [];
+  const requests = [];
+  const server = http.createServer((request, response) => {
+    requests.push(request.url);
+    response.setHeader('content-type', 'application/json');
+    response.end(JSON.stringify({ ok: true, ready: true, pid: process.pid, apiVersion: 3, features }));
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => server.close());
+  const state = { pid: process.pid, port: server.address().port, apiVersion: 3 };
+  const statePath = path.join(directory, 'helper.json');
+  await fs.writeFile(statePath, JSON.stringify(state));
+  const helper = new HelperClient({ configDirectory: directory, dataDirectory: directory });
+  helper.launch = async () => {
+    assert.deepEqual(requests, ['/health', '/health', '/health', '/shutdown']);
+    features = ['dictate', 'prewarm'];
+    await fs.writeFile(statePath, JSON.stringify({ ...state, features }));
+  };
+  assert.deepEqual((await helper.ensureRunning(undefined, ['dictate'])).features, ['dictate', 'prewarm']);
 });
 
 test('runCommand can ignore inherited daemon output pipes', async () => {

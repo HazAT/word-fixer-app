@@ -97,7 +97,10 @@ function validatedHelperState(value) {
     || !Number.isSafeInteger(value.port) || value.port <= 0 || value.port > 65535
     || value.apiVersion !== HELPER_API_VERSION
   ) return null;
-  return { pid: value.pid, port: value.port, apiVersion: value.apiVersion };
+  return { pid: value.pid, port: value.port, apiVersion: value.apiVersion,
+    features: Array.isArray(value.features) && value.features.every(feature => typeof feature === 'string')
+      ? value.features : [],
+  };
 }
 
 async function fetchJson(url, body, { signal, timeoutMs }) {
@@ -141,6 +144,7 @@ export class HelperClient {
     helperScript = path.join(repositoryRoot, 'helper', 'word-fixer-helper.mjs'),
     helperStartupTimeoutMs = 5_000,
     reviewTimeoutMs = 35_000,
+    dictationTimeoutMs = 8_000,
     environment = process.env,
   } = {}) {
     this.configDirectory = configDirectory;
@@ -149,6 +153,7 @@ export class HelperClient {
     this.helperScript = helperScript;
     this.helperStartupTimeoutMs = helperStartupTimeoutMs;
     this.reviewTimeoutMs = reviewTimeoutMs;
+    this.dictationTimeoutMs = dictationTimeoutMs;
     this.environment = environment;
   }
 
@@ -160,7 +165,7 @@ export class HelperClient {
     }
   }
 
-  async health(state, signal) {
+  async health(state, signal, requiredFeatures = []) {
     if (!state) return false;
     try {
       const value = await fetchJson(`http://127.0.0.1:${state.port}/health`, {}, {
@@ -169,7 +174,9 @@ export class HelperClient {
       });
       return value.ready === true
         && value.apiVersion === HELPER_API_VERSION
-        && value.pid === state.pid;
+        && value.pid === state.pid
+        && requiredFeatures.every(feature => state.features.includes(feature)
+          && Array.isArray(value.features) && value.features.includes(feature));
     } catch (error) {
       if (signal?.aborted) throw (signal.reason instanceof Error ? signal.reason : error);
       return false;
@@ -202,18 +209,84 @@ export class HelperClient {
     child.unref();
   }
 
-  async ensureRunning(signal) {
+  async ensureRunning(signal, requiredFeatures = []) {
     let state = await this.readState();
-    if (await this.health(state, signal)) return state;
+    if (await this.health(state, signal, requiredFeatures)) return state;
 
+    await fs.mkdir(this.dataDirectory, { recursive: true });
+    const startupLock = path.join(this.dataDirectory, 'helper-start.lock');
+    const lockDeadline = Date.now() + this.helperStartupTimeoutMs;
+    let lock;
+    while (!lock) {
+      if (signal?.aborted) throw signal.reason;
+      try {
+        lock = await fs.open(startupLock, 'wx', 0o600);
+        await lock.writeFile(String(process.pid));
+      } catch (error) {
+        if (error.code !== 'EEXIST') throw error;
+        try {
+          const owner = Number(await fs.readFile(startupLock, 'utf8'));
+          if (Number.isSafeInteger(owner) && owner > 0) process.kill(owner, 0);
+          else if (Date.now() - (await fs.stat(startupLock)).mtimeMs > this.helperStartupTimeoutMs) {
+            await fs.rm(startupLock, { force: true });
+          }
+        } catch (ownerError) {
+          if (ownerError.code === 'ESRCH') await fs.rm(startupLock, { force: true });
+          else if (ownerError.code !== 'ENOENT') throw ownerError;
+        }
+        if (Date.now() >= lockDeadline) throw new Error('Word Fixer helper startup lock timed out.');
+        await delay(50, signal);
+      }
+    }
+    try {
+      state = await this.readState();
+      if (await this.health(state, signal, requiredFeatures)) return state;
+      return await this.startHelper(signal, requiredFeatures);
+    } finally {
+      await lock.close();
+      await fs.rm(startupLock, { force: true });
+    }
+  }
+
+  async startHelper(signal, requiredFeatures) {
+    let state;
+    try {
+      const previous = await this.readState();
+      if (previous && requiredFeatures.length) {
+        const url = `http://127.0.0.1:${previous.port}`;
+        const health = await fetchJson(`${url}/health`, {}, { signal, timeoutMs: 2_000 });
+        if (health.pid === previous.pid && health.apiVersion === HELPER_API_VERSION
+          && requiredFeatures.some(feature => !previous.features.includes(feature)
+            || !Array.isArray(health.features) || !health.features.includes(feature))) {
+          await fetchJson(`${url}/shutdown`, {}, { signal, timeoutMs: 2_000 });
+          await delay(100, signal);
+        }
+      }
+    } catch (error) {
+      if (signal?.aborted) throw error;
+    }
+    if (signal?.aborted) throw signal.reason;
     await this.launch();
     const deadline = Date.now() + this.helperStartupTimeoutMs;
     while (Date.now() < deadline) {
       state = await this.readState();
-      if (await this.health(state, signal)) return state;
+      if (await this.health(state, signal, requiredFeatures)) return state;
       await delay(50, signal);
     }
     throw new Error('Word Fixer helper failed to become ready.');
+  }
+
+  async dictate(text, { context, signal } = {}) {
+    const state = await this.ensureRunning(signal, ['dictate']);
+    const value = await fetchJson(`http://127.0.0.1:${state.port}/dictate`, { text, context }, {
+      signal, timeoutMs: this.dictationTimeoutMs,
+    });
+    return { text: value.text, cost: value.cost, durationMs: value.durationMs };
+  }
+
+  async prewarm({ signal } = {}) {
+    const state = await this.ensureRunning(signal, ['prewarm']);
+    await fetchJson(`http://127.0.0.1:${state.port}/prewarm`, {}, { signal, timeoutMs: 8_000 });
   }
 
   async review(text, { signal } = {}) {

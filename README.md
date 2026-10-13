@@ -127,7 +127,7 @@ The installation is idempotent. It:
 - installs the locked `@earendil-works/pi-coding-agent@1.1.0` SDK under `~/.local/share/word-fixer/sdk/` (or `$XDG_DATA_HOME/word-fixer/sdk/`);
 - records a dedicated Node executable link in app support state;
 - links the repository as the `hazat.word-fixer` overlay/bar-widget plugin, enables it, and places its status icon in the right bar section;
-- links `linux/bin/word-fixer` into `~/.local/bin/word-fixer`;
+- links `linux/bin/word-fixer` and `linux/bin/word-fixer-dictate` into `~/.local/bin/`;
 - seeds only missing prompt and settings files.
 
 Existing prompt bytes are never overwritten. Existing compatible settings are also retained; stale provider/model settings are replaced with the current defaults. `--check` is non-destructive and fails clearly if installation or dedicated model settings are incomplete; no fallback model is selected.
@@ -207,6 +207,47 @@ Important clipboard behavior on Omarchy:
 - Previous rich clipboard MIME data is **not** restored, even after cancellation or error.
 - Transport and paste are plain text; rich clipboard preservation is unsupported.
 
+### Dictation (Linux only)
+
+`word-fixer-dictate` repairs a UTF-8 speech transcript from stdin and writes only the repaired transcript to stdout. It uses one fresh Luna session with the same thinking/tool/session invariants as reviews. It never captures text, touches the clipboard, opens an overlay, or pastes; Voxtype owns the paste.
+
+A generic Voxtype configuration:
+
+```toml
+[output]
+pre_recording_command = "word-fixer-dictate --prewarm"
+
+[output.post_process]
+command = "word-fixer-dictate --source voxtype"
+timeout_ms = 10000
+```
+
+The versioned helper API stays at v3; `/health` and `helper.json` advertise additive `features: ["dictate", "prewarm"]`. Reviews continue to accept healthy v3 helpers without features. Dictation and prewarm replace a verified v3 helper missing their required feature before calling the new endpoint, leaving macOS unchanged.
+
+Use absolute command paths if your service has a minimal PATH. Prewarm detaches immediately; it loads the helper SDK without creating a persistent conversation. Concurrent dictations do not take the review lock.
+
+Inputs must be non-empty and at most 8 KiB. The whole-run deadline defaults to 8000 ms. Guard rejection exits 3; other failures exit 1, with empty stdout and a one-line stderr reason. Voxtype then falls back to its raw transcript. The guard compares normalized character edits (default maximum ratio 0.5) and rejects excessive output growth.
+
+The installer seeds `.pi/DICTATION.md` only when missing. Optionally create `.pi/VOCABULARY.md`, with one term and its known mishearings per line, for example:
+
+```text
+ExampleProduct (example product)
+ExampleLibrary (example library)
+```
+
+Both files are read on each dictation, so edits need no helper restart. The installer never creates or modifies vocabulary. `VOXTYPE_CONTEXT` supplies up to 4 KiB of previous dictation as context only, never as output.
+
+Optional `config.json` settings:
+
+```json
+{
+  "helperIdleTimeoutMs": 120000,
+  "dictation": { "timeoutMs": 8000, "maxEditRatio": 0.5 }
+}
+```
+
+`WORD_FIXER_HELPER_IDLE_MS` takes precedence over the configured positive-integer idle timeout. `WORD_FIXER_CONFIG_DIR` and `WORD_FIXER_DATA_DIR` can isolate test runs from the live install.
+
 ## Configuration and state
 
 Both frontends respect `XDG_CONFIG_HOME` and `XDG_DATA_HOME`; Omarchy also uses `XDG_RUNTIME_DIR` for request IPC:
@@ -218,6 +259,8 @@ Both frontends respect `XDG_CONFIG_HOME` and `XDG_DATA_HOME`; Omarchy also uses 
     ├── SYSTEM.md               # light-edit prompt
     ├── NATURAL.md              # natural-English prompt
     ├── FEEDBACK.md             # takeaway prompt
+    ├── DICTATION.md            # Linux dictation prompt, loaded lazily
+    ├── VOCABULARY.md           # optional user vocabulary, never seeded
     ├── settings.json           # dedicated provider/model/thinking settings
     └── models.json             # optional app-specific custom model definitions
 
