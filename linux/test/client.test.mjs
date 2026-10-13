@@ -9,6 +9,7 @@ import { once } from 'node:events';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { executeWordFixer } from '../lib/orchestrator.mjs';
+import { reviewEvent } from '../lib/events.mjs';
 import { selectClipboardCommand } from '../lib/input-command.mjs';
 import {
   acquireRequestRuntime,
@@ -134,6 +135,7 @@ async function execute(t, system, options = {}) {
       system,
       completionTimeoutMs: options.completionTimeoutMs ?? 1_000,
       signal: options.signal,
+      eventDetails: options.eventDetails,
       acquireRuntime: async () => {
         const runtime = await acquireRequestRuntime({ runtimeDirectory });
         requestDirectory = runtime.requestDirectory;
@@ -543,6 +545,35 @@ test('Linux copy and paste dispatch verify the exact target and emit installed c
     assert.match(dispatches[2].args[1], new RegExp(`mods = '${expectedPaste[0]}'.*key = '${expectedPaste[1]}'.*state = 'down'`));
     assert.match(dispatches[3].args[1], new RegExp(`mods = '${expectedPaste[0]}'.*key = '${expectedPaste[1]}'.*state = 'up'`));
   }
+});
+
+test('review completion details preserve captured input, alternatives and choices for events', async (t) => {
+  for (const [options, outcome] of [
+    [{}, 'pasted'],
+    [{ sourceExists: false }, 'clipboard'],
+    [{ refocused: false }, 'clipboard'],
+    [{ activeAfterFocus: { ...normalWindow, pid: 9999 } }, 'clipboard'],
+    [{ completion: { state: 'review', outcome: 'cancel' } }, 'cancelled'],
+    [{ completion: { state: 'loading', outcome: 'cancel' } }, 'cancelled'],
+    [{ review: new Error('offline'), completion: { state: 'error', outcome: 'cancel' } }, 'failed'],
+  ]) {
+    const result = await execute(t, new StubSystem(options));
+    const event = reviewEvent(result);
+    assert.equal(event.outcome, outcome);
+    assert.equal(event.input, 'This are wrong.');
+    assert.equal(event.target.class, normalWindow.initialClass);
+    assert.equal(typeof event.durationMs, 'number');
+    if (['pasted', 'clipboard'].includes(outcome)) {
+      assert.equal(event.review.choice, 'light');
+      assert.equal(event.review.correction, 'This is wrong.');
+      assert.equal(event.output, 'This is wrong.');
+    }
+    if (outcome === 'failed') assert.equal(event.error, 'offline');
+  }
+  const details = {};
+  await assert.rejects(execute(t, new StubSystem({ text: '' }), { eventDetails: details }));
+  assert.equal(reviewEvent(details).outcome, 'failed');
+  assert.ok(reviewEvent(details).error);
 });
 
 test('product Hyprland callback captures target/type without injecting input in the key handler', async () => {

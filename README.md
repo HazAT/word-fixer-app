@@ -248,6 +248,10 @@ Optional `config.json` settings:
 
 `WORD_FIXER_HELPER_IDLE_MS` takes precedence over the configured positive-integer idle timeout. `WORD_FIXER_CONFIG_DIR` and `WORD_FIXER_DATA_DIR` can isolate test runs from the live install.
 
+### Opt-in event hooks
+
+Linux dictations and Omarchy review completions can send one `word-fixer.event.v1` JSON event to an argv-based `eventCommand` and/or append it with `eventLog: true`. Both are off by default. Events contain raw input/output text, ASR metadata, review choices, and window metadata. Hook children do not inherit stdout/stderr and are not awaited beyond the 1000 ms stdin cap; failures never change dictation output or paste behavior. See [the event contract and generic hook example](docs/events.md).
+
 ## Configuration and state
 
 Both frontends respect `XDG_CONFIG_HOME` and `XDG_DATA_HOME`; Omarchy also uses `XDG_RUNTIME_DIR` for request IPC:
@@ -270,6 +274,7 @@ Both frontends respect `XDG_CONFIG_HOME` and `XDG_DATA_HOME`; Omarchy also uses 
 ├── helper.json                 # live helper PID/port/version state
 ├── models-store.json           # SDK runtime model state
 ├── debug.log                   # only when debug logging is enabled
+├── events.jsonl                # raw-text NDJSON, opt-in eventLog, mode 0600
 └── npm-cache/                  # app SDK installation cache
 
 ${XDG_RUNTIME_DIR:-/tmp}/word-fixer/

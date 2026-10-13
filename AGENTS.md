@@ -55,6 +55,10 @@ Helper API remains v3 with additive `features: ["dictate", "prewarm"]` in health
 
 Load `DICTATION.md` and optional user `VOCABULARY.md` lazily on every call, never in `loadPiServices`. The macOS installer does not seed the dictation prompt. Linux installers seed only missing `DICTATION.md` and never create or modify vocabulary.
 
+### Linux event hooks
+
+Follow `docs/events.md` for the `word-fixer.event.v1` contract. Emit one completion event per dictation/review, never prewarm or duplicate invocation. `eventCommand` (argv, no shell) and `eventLog` are opt-in and off by default: events contain raw user text. Detached hook stdout/stderr must be ignored, stdin delivery capped at 1000 ms, and failures must never alter output, exit code, or paste-safety ordering. No network integration or retries belong here. ASR labels come from `WORD_FIXER_ASR_ENGINE`, `WORD_FIXER_ASR_MODEL`, and `WORD_FIXER_ASR_BACKEND`.
+
 ## Configuration and generated state
 
 ```text
@@ -68,6 +72,7 @@ Load `DICTATION.md` and optional user `VOCABULARY.md` lazily on every call, neve
 ~/.local/share/word-fixer/helper.json
 ~/.local/share/word-fixer/models-store.json
 ~/.local/share/word-fixer/debug.log
+~/.local/share/word-fixer/events.jsonl (opt-in, raw text, mode 0600)
 ${XDG_RUNTIME_DIR:-/tmp}/word-fixer/
 ```
 
@@ -103,6 +108,7 @@ Platform installers seed only missing prompts and settings. Never overwrite user
 - `linux/bin/word-fixer-dictate`, `linux/lib/dictate.mjs` — bounded stdin/stdout dictation, guard and detached prewarm.
 - `shared/prompts/DICTATION.md` — transcript-only repair contract.
 - `linux/hypr/word-fixer.lua` — source capture and deferred external-client launch only; no clipboard or input injection.
+- `linux/lib/events.mjs` — v1 event builders, bounded target capture, opt-in detached hook and local NDJSON log.
 - `linux/lib/orchestrator.mjs` — loading/review/error flow and safe paste-back.
 - `linux/lib/system.mjs` — process, helper, clipboard, shell, focus, and notification integration.
 - `linux/lib/runtime.mjs` — restrictive request IPC, lock, timeout, and cleanup.

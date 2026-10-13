@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 import process from 'node:process';
+import path from 'node:path';
+import { loadWordFixerConfig, resolveDataDir, createLogger } from '../../helper/helper-lib.mjs';
+import { emitEvent, reviewEvent } from '../lib/events.mjs';
 import { executeWordFixer, DEFAULT_COMPLETION_TIMEOUT_MS } from '../lib/orchestrator.mjs';
 import { acquireRequestRuntime, DuplicateInvocationError } from '../lib/runtime.mjs';
 import { LinuxSystem } from '../lib/system.mjs';
@@ -52,10 +55,14 @@ for (const signalName of ['SIGINT', 'SIGTERM']) {
 }
 
 const system = new LinuxSystem();
+const eventDetails = { status: 'failed', durationMs: 0 };
+const started = Date.now();
+let duplicate = false;
 try {
   const source = parseArguments(process.argv.slice(2));
   const result = await executeWordFixer({
     ...source,
+    eventDetails,
     system,
     signal: controller.signal,
     completionTimeoutMs: configuredTimeout(),
@@ -66,7 +73,9 @@ try {
   }
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
+  Object.assign(eventDetails, { status: 'failed', error: message });
   if (error instanceof DuplicateInvocationError) {
+    duplicate = true;
     await system.notifyFailure(message);
   } else if (!controller.signal.aborted) {
     await system.notifyFailure(message);
@@ -74,6 +83,13 @@ try {
   process.stderr.write(`word-fixer: ${message}\n`);
   process.exitCode = 1;
 } finally {
+  if (!duplicate) {
+    const config = await loadWordFixerConfig().catch(() => ({}));
+    const dataDir = resolveDataDir();
+    const log = createLogger({ debugEnabled: config.debugLogging === true || process.env.WORD_FIXER_DEBUG === '1', logFile: path.join(dataDir, 'debug.log') });
+    eventDetails.durationMs = Date.now() - started;
+    await emitEvent(reviewEvent(eventDetails), { config, dataDir, log });
+  }
   for (const [signalName, handler] of signalHandlers) {
     process.off(signalName, handler);
   }

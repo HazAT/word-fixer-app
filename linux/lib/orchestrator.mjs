@@ -43,6 +43,7 @@ export async function runReviewFlow({
   system,
   signal,
   completionTimeoutMs = DEFAULT_COMPLETION_TIMEOUT_MS,
+  eventDetails = {},
 }) {
   let overlayShown = false;
   const reviewController = new AbortController();
@@ -52,6 +53,8 @@ export async function runReviewFlow({
   try {
     const sourceWindow = await system.getActiveWindow({ signal });
     const sourceTarget = captureTarget(sourceWindow);
+    eventDetails.target = { class: sourceTarget.initialClass, title: sourceWindow.title ?? '' };
+    eventDetails.terminal = sourceTerminal;
     if (sourceTarget.address !== sourceAddress.toLowerCase() || sourceTarget.pid !== sourcePid) {
       throw new Error('The source window changed before Word Fixer captured the selection.');
     }
@@ -62,6 +65,7 @@ export async function runReviewFlow({
     await system.clearClipboard({ signal });
     await system.copy(sourceWindow, sourceTarget, { signal });
     const selectedText = await system.readClipboardText({ signal });
+    eventDetails.input = selectedText;
     const request = createReviewRequest({ requestId: runtime.requestId, text: selectedText });
 
     await publishAndSummon(runtime, system, overlayPayload(runtime, 'loading'));
@@ -71,15 +75,17 @@ export async function runReviewFlow({
       timeoutMs: completionTimeoutMs,
       signal,
     });
-    const reviewPromise = system.review(request.text, { signal: reviewController.signal }).then((value) => (
-      createReviewResult({
+    const modelStarted = Date.now();
+    const reviewPromise = system.review(request.text, { signal: reviewController.signal }).then((value) => {
+      eventDetails.llm = { durationMs: value?.durationMs ?? Date.now() - modelStarted, cost: value?.cost ?? null };
+      return createReviewResult({
         requestId: runtime.requestId,
         correction: value?.correction,
         natural: value?.natural,
         takeaway: value?.takeaway ?? value?.feedback,
         cost: value?.cost,
-      })
-    ));
+      });
+    });
     const first = await waitForReviewOrCancellation({ reviewPromise, completionPromise });
 
     if (first.type === 'completion-error') throw first.error;
@@ -108,6 +114,7 @@ export async function runReviewFlow({
     }
 
     const review = first.review;
+    eventDetails.review = review;
     await publishAndSummon(runtime, system, overlayPayload(runtime, 'review', {
       original: request.text,
       correction: review.correction,
@@ -123,7 +130,9 @@ export async function runReviewFlow({
       return { status: 'cancelled' };
     }
 
+    eventDetails.choice = completion.choice;
     const acceptedText = completion.choice === 0 ? review.correction : review.natural;
+    eventDetails.acceptedText = acceptedText;
     await system.hideOverlay();
     overlayShown = false;
     await system.writeClipboardText(acceptedText, { signal });
@@ -162,9 +171,17 @@ export async function runReviewFlow({
 
 export async function executeWordFixer(options) {
   const runtime = await options.acquireRuntime();
+  const eventDetails = options.eventDetails ?? {};
+  const started = Date.now();
   try {
-    return await runReviewFlow({ ...options, runtime });
+    const result = await runReviewFlow({ ...options, eventDetails, runtime });
+    Object.assign(eventDetails, result);
+    return { ...eventDetails, durationMs: Date.now() - started };
+  } catch (error) {
+    Object.assign(eventDetails, { status: 'failed', error });
+    throw error;
   } finally {
+    eventDetails.durationMs = Date.now() - started;
     await runtime.cleanup();
   }
 }
