@@ -209,7 +209,7 @@ Important clipboard behavior on Omarchy:
 
 ### Dictation (Linux only)
 
-`word-fixer-dictate` repairs a UTF-8 speech transcript from stdin and writes only the repaired transcript to stdout. It uses one fresh Luna session with the same thinking/tool/session invariants as reviews. It never captures text, touches the clipboard, opens an overlay, or pastes; Voxtype owns the paste.
+`word-fixer-dictate` repairs a UTF-8 speech transcript from stdin and writes only the repaired transcript to stdout. The repair is word for word: it fixes misheard words (using the optional vocabulary), capitalization and punctuation, and keeps repetitions, restarts, filler words and spelled-out letters. It uses one fresh Luna session with the same thinking/tool/session invariants as reviews. It never captures text, touches the clipboard, opens an overlay, or pastes; Voxtype owns the paste.
 
 A generic Voxtype configuration:
 
