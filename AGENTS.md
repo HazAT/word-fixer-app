@@ -38,7 +38,7 @@ Never clear the clipboard or inject copy from inside the triggering Hyprland Lua
 
 Every task session must use:
 
-- provider/model: `openai/gpt-6-luna`;
+- provider/model: `openai-codex/gpt-6-luna`;
 - thinking: `off`;
 - tools: `noTools: "all"`;
 - fresh in-memory session, disposed on every completion path.
@@ -49,7 +49,7 @@ The locked `@earendil-works/pi-coding-agent` SDK belongs under `~/.local/share/w
 
 ### Linux dictation
 
-`word-fixer-dictate` transforms stdin to one repaired transcript on stdout; Voxtype owns paste. This is the explicitly supported exception to no auto-paste without review, not a clipboard or capture path. Use one fresh in-memory `openai/gpt-6-luna` session, thinking off, no tools, disposed on every path. Every failure or guard rejection has empty stdout and non-zero exit so Voxtype uses raw text. No review lock, notifications, model fallback or macOS dictation.
+`word-fixer-dictate` transforms stdin to one repaired transcript on stdout; Voxtype owns paste. This is the explicitly supported exception to no auto-paste without review, not a clipboard or capture path. Use one fresh in-memory `openai-codex/gpt-6-luna` session, thinking off, no tools, disposed on every path. Every failure or guard rejection has empty stdout and non-zero exit so Voxtype uses raw text. No review lock, notifications, model fallback or macOS dictation.
 
 Helper API remains v3 with additive `features: ["dictate", "prewarm"]` in health and helper state. Reviews require only a healthy v3 helper; dictation/prewarm also require the corresponding feature, retiring verified featureless v3 helpers under the startup lock. Do not change Swift or weaken macOS capture/apply behavior.
 

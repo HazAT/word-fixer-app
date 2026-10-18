@@ -4,7 +4,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 export const REVIEW_MODEL = Object.freeze({
-  provider: 'openai',
+  provider: 'openai-codex',
   id: 'gpt-6-luna',
 });
 export const MAX_REVIEW_INPUT_BYTES = 64 * 1024;

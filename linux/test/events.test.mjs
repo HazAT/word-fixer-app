@@ -16,7 +16,7 @@ for (const outcome of ['fixed', 'unchanged', 'rejected', 'failed']) {
     assert.equal(event.host, os.hostname());
     assert.equal(event.platform, 'omarchy');
     assert.equal(event.outcome, outcome);
-    assert.equal(event.llm.model, 'openai/gpt-6-luna');
+    assert.equal(event.llm.model, 'openai-codex/gpt-6-luna');
     assert.deepEqual(event.dictation, { source: 'voxtype', hadContext: true, asr: { engine: null, model: null, backend: null }, guard: { accepted: outcome !== 'rejected', editRatio: 0 } });
     assert.equal('review' in event, false);
   });

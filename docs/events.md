@@ -40,7 +40,7 @@ Common fields:
 - `outcome`: dictation `fixed`, `unchanged`, `rejected`, `failed`; review `pasted`, `clipboard`, `cancelled`, `failed`.
 - `durationMs`: total run duration.
 - `target`: `{ "class": "...", "title": "..." }` or null.
-- `llm`: `{ "model": "openai/gpt-6-luna", "durationMs": 0, "cost": 0.0 }` or null; numeric fields may be null.
+- `llm`: `{ "model": "openai-codex/gpt-6-luna", "durationMs": 0, "cost": 0.0 }` or null; numeric fields may be null.
 - `error`: error message or null.
 
 Only dictation events include `dictation`:

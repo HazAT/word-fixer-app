@@ -5,7 +5,7 @@ umask 077
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 SDK_PACKAGE="@earendil-works/pi-coding-agent"
-PROVIDER="openai"
+PROVIDER="openai-codex"
 MODEL="gpt-6-luna"
 CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"

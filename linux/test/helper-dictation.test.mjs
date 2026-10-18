@@ -20,7 +20,7 @@ export class DefaultResourceLoader {
   async reload() {}
 }
 export async function createAgentSession(options) {
-  assert.equal(options.model.provider, 'openai');
+  assert.equal(options.model.provider, 'openai-codex');
   assert.equal(options.model.id, 'gpt-6-luna');
   assert.equal(options.thinkingLevel, 'off');
   assert.equal(options.noTools, 'all');

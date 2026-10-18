@@ -1,8 +1,8 @@
 {
-  "defaultProvider": "openai",
+  "defaultProvider": "openai-codex",
   "defaultModel": "gpt-6-luna",
   "defaultThinkingLevel": "off",
   "modelThinkingLevels": {
-    "openai/gpt-6-luna": "off"
+    "openai-codex/gpt-6-luna": "off"
   }
 }

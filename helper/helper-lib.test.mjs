@@ -541,16 +541,16 @@ test('caller cancellation aborts and disposes all three active sessions', async 
 });
 
 test('requires the exact OpenAI review model before creating sessions', async () => {
-  assert.deepEqual(REVIEW_MODEL, { provider: 'openai', id: 'gpt-6-luna' });
+  assert.deepEqual(REVIEW_MODEL, { provider: 'openai-codex', id: 'gpt-6-luna' });
   for (const model of [
     { provider: 'another-provider', id: 'gpt-6-luna' },
-    { provider: 'openai', id: 'another-model' },
+    { provider: 'openai-codex', id: 'another-model' },
   ]) {
     const { services, sessions } = reviewServices();
     services.model = model;
     await assert.rejects(
       reviewText({ services, text: 'Text to review', cwd: '/tmp', log: { async log() {} } }),
-      /Required model openai\/gpt-6-luna is unavailable/,
+      /Required model openai-codex\/gpt-6-luna is unavailable/,
     );
     assert.equal(sessions.length, 0);
   }
