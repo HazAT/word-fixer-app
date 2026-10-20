@@ -193,3 +193,12 @@ test('manifest and QML declare a keep-loaded overlay with a ready-state bar icon
   assert.ok(qml.indexOf('Light edit') < qml.indexOf('Natural English'));
   assert.ok(qml.indexOf('Natural English') < qml.indexOf('Takeaway'));
 });
+
+test('QML qualifies the shell palette so Qt 6.12 QtQuick.Color cannot shadow it', async () => {
+  const manifest = JSON.parse(await fs.readFile(path.join(repositoryRoot, 'manifest.json'), 'utf8'));
+  for (const entryPoint of Object.values(manifest.entryPoints)) {
+    const qml = await fs.readFile(path.join(repositoryRoot, entryPoint), 'utf8');
+    assert.doesNotMatch(qml, /(?<![\w.])Color\./, entryPoint);
+    if (/Commons\.Color\./.test(qml)) assert.match(qml, /^import qs\.Commons as Commons$/m, entryPoint);
+  }
+});

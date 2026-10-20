@@ -4,6 +4,7 @@ import Quickshell.Wayland
 import QtQuick
 import QtQuick.Controls
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "WordFixerModel.js" as WordFixerModel
 
@@ -27,12 +28,12 @@ Item {
   property string errorAction: ""
   property var cost: null
 
-  readonly property color background: Color.menu.background
-  readonly property color foreground: Color.menu.text
-  readonly property color accent: Color.accent
-  readonly property color urgent: Color.urgent
-  readonly property color scrim: Color.menu.scrim
-  readonly property color border: Color.menu.border
+  readonly property color background: Commons.Color.menu.background
+  readonly property color foreground: Commons.Color.menu.text
+  readonly property color accent: Commons.Color.accent
+  readonly property color urgent: Commons.Color.urgent
+  readonly property color scrim: Commons.Color.menu.scrim
+  readonly property color border: Commons.Color.menu.border
   readonly property var cardBorderSpec: Border.surfaceSpec("menu", "border", border, Math.max(1, Style.space(2)))
   readonly property int cornerRadius: Style.cornerRadius
   readonly property int contentMargin: Style.spacing.panelPadding
