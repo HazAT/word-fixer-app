@@ -327,7 +327,11 @@ async function runTextTask({ services, text, cwd, log, systemPrompt, preserveLin
     throw new Error(`Required model ${REVIEW_MODEL.provider}/${REVIEW_MODEL.id} is unavailable.`);
   }
 
-  const transport = preserveLineBreaks ? encodeLineBreaks(text) : null;
+  // Edge breaks never reach the model: it sometimes drops a marker at the very end, which would fail the task.
+  const [, leadingBreaks, coreText, trailingBreaks] = preserveLineBreaks
+    ? /^([\r\n]*)([\s\S]*?)([\r\n]*)$/.exec(text)
+    : [, '', text, ''];
+  const transport = preserveLineBreaks ? encodeLineBreaks(coreText) : null;
   const resourceLoader = await raceWithAbort(services.createResourceLoader(
     transport ? `${systemPrompt}\n${lineBreakProtocol(transport)}` : systemPrompt,
   ), signal);
@@ -395,13 +399,15 @@ async function runTextTask({ services, text, cwd, log, systemPrompt, preserveLin
       }
     });
 
-    await raceWithAbort(session.prompt(transport?.encodedText ?? text), signal);
+    await raceWithAbort(session.prompt(transport?.encodedText ?? coreText), signal);
     promptFinished = true;
     if (completionError) {
       throw new Error(completionError);
     }
     const rawResult = completedText || assistantText;
-    const resultText = transport ? restoreLineBreaks(rawResult, transport) : rawResult.trim();
+    const resultText = transport
+      ? `${leadingBreaks}${restoreLineBreaks(rawResult, transport)}${trailingBreaks}`
+      : rawResult.trim();
     validateOutput('task output', resultText);
     if (cost !== undefined && (typeof cost !== 'number' || !Number.isFinite(cost) || cost < 0)) {
       throw new Error('Pi returned malformed task cost data.');

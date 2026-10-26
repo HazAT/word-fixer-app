@@ -274,6 +274,21 @@ test('keeps line breaks the model added inside the text for review', () => {
   assert.equal(restoreLineBreaks('one two\nthree', encodeLineBreaks('one two three')), 'one two\nthree');
 });
 
+test('edge line breaks bypass the model, so a dropped trailing marker cannot fail the task', async () => {
+  const prompts = [];
+  const { services } = reviewServices({ outputs: { correction: 'So Sentry tracks the errors' } });
+  const prompt = services.createAgentSession;
+  services.createAgentSession = async (options) => {
+    const created = await prompt(options);
+    const send = created.session.prompt;
+    created.session.prompt = (text) => (prompts.push(text), send(text));
+    return created;
+  };
+  const result = await fixText({ services, text: '\nso century tracks the errors\r\n', cwd: '/tmp', log: { async log() {} } });
+  assert.equal(result.text, '\nSo Sentry tracks the errors\r\n');
+  assert.deepEqual(prompts, ['so century tracks the errors']);
+});
+
 test('fixText preserves boundary, blank, LF, CRLF, and CR breaks', async () => {
   const original = '\nThs first line.\r\n\r\nSecnd line.\rLast eror.\n';
   let subscribed;
