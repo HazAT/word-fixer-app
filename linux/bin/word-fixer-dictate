@@ -6,6 +6,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { loadWordFixerConfig, resolveDataDir, createLogger, MAX_DICTATION_INPUT_BYTES } from '../../helper/helper-lib.mjs';
 import { executeDictation } from '../lib/dictate.mjs';
+import { warnDictationFallback } from '../lib/dictation-warning.mjs';
 import { HelperClient } from '../lib/system.mjs';
 
 const argv = process.argv.slice(2);
@@ -37,7 +38,10 @@ if (argv.length === 1 && argv[0] === '--prewarm') {
       if (result.stderr) await new Promise((resolve) => process.stderr.write(result.stderr, resolve));
       if (result.stdout) await new Promise((resolve) => process.stdout.write(result.stdout, resolve));
       const log = createLogger({ debugEnabled: config.debugLogging === true || process.env.WORD_FIXER_DEBUG === '1', logFile: path.join(config.dataDir, 'debug.log') });
-      await emitEvent(dictationEvent(result.details, { target: await targetPromise, env: process.env }), { config, dataDir: config.dataDir, log });
+      await Promise.all([
+        emitEvent(dictationEvent(result.details, { target: await targetPromise, env: process.env }), { config, dataDir: config.dataDir, log }),
+        warnDictationFallback(result.details),
+      ]);
       process.exit(result.exitCode);
     }
   } catch (error) {
@@ -45,7 +49,11 @@ if (argv.length === 1 && argv[0] === '--prewarm') {
     if (!argv.includes('--prewarm-worker')) {
       const dataDir = resolveDataDir();
       const config = await loadWordFixerConfig().catch(() => ({}));
-      await emitEvent(dictationEvent({ input: null, output: null, outcome: 'failed', durationMs: 0, source: null, hadContext: !!process.env.VOXTYPE_CONTEXT?.trim(), error }), { config, dataDir });
+      const details = { input: null, output: null, outcome: 'failed', durationMs: 0, source: null, hadContext: !!process.env.VOXTYPE_CONTEXT?.trim(), error };
+      await Promise.all([
+        emitEvent(dictationEvent(details), { config, dataDir }),
+        warnDictationFallback({ outcome: 'failed', error: String(error?.message ?? error) }),
+      ]);
     }
     process.exitCode = 1;
   }

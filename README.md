@@ -226,7 +226,7 @@ The versioned helper API stays at v3; `/health` and `helper.json` advertise addi
 
 Use absolute command paths if your service has a minimal PATH. Prewarm detaches immediately; it loads the helper SDK without creating a persistent conversation. Concurrent dictations do not take the review lock.
 
-Inputs must be non-empty and at most 8 KiB. The whole-run deadline defaults to 8000 ms. Guard rejection exits 3; other failures exit 1, with empty stdout and a one-line stderr reason. Voxtype then falls back to its raw transcript. The guard compares normalized character edits (default maximum ratio 0.5) and rejects excessive output growth.
+Inputs must be non-empty and at most 8 KiB. The whole-run deadline defaults to 8000 ms. Guard rejection exits 3; other failures exit 1, with empty stdout and a one-line stderr reason. Voxtype then falls back to its raw transcript. A failure (not a guard rejection) also shows a desktop notification that the raw transcript was pasted. It is critical and names the fix when the Pi login or the helper is broken (for example `pi`, then `/login` → OpenAI Codex (legacy)), and normal for timeouts. The same failure repeats at most every 15 minutes until a dictation succeeds again. The guard compares normalized character edits (default maximum ratio 0.5) and rejects excessive output growth.
 
 The installer seeds `.pi/DICTATION.md` only when missing. Optionally create `.pi/VOCABULARY.md`, with one term and its known mishearings per line, for example:
 

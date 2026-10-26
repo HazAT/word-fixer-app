@@ -49,7 +49,9 @@ The locked `@earendil-works/pi-coding-agent` SDK belongs under `~/.local/share/w
 
 ### Linux dictation
 
-`word-fixer-dictate` transforms stdin to one repaired transcript on stdout; Voxtype owns paste. This is the explicitly supported exception to no auto-paste without review, not a clipboard or capture path. Use one fresh in-memory `openai-codex/gpt-6-luna` session, thinking off, no tools, disposed on every path. Every failure or guard rejection has empty stdout and non-zero exit so Voxtype uses raw text. No review lock, notifications, model fallback or macOS dictation.
+`word-fixer-dictate` transforms stdin to one repaired transcript on stdout; Voxtype owns paste. This is the explicitly supported exception to no auto-paste without review, not a clipboard or capture path. Use one fresh in-memory `openai-codex/gpt-6-luna` session, thinking off, no tools, disposed on every path. Every failure or guard rejection has empty stdout and non-zero exit so Voxtype uses raw text. No review lock, model fallback or macOS dictation.
+
+The one notification is the fallback warning in `linux/lib/dictation-warning.mjs`: a failed dictation (exit 1) sends a detached `notify-send` saying the raw transcript was pasted, critical with the fix for auth and helper/setup errors and normal for timeouts. Guard rejections (exit 3) and prewarm never notify. Each failure kind repeats at most every 15 minutes (per-kind timestamps in `${XDG_RUNTIME_DIR}/word-fixer/dictation-warning.json`, cleared by the next repaired dictation). The warning is never awaited beyond 250 ms, runs after stdout is written, and never changes stdout or the exit code.
 
 Helper API remains v3 with additive `features: ["dictate", "prewarm"]` in health and helper state. Reviews require only a healthy v3 helper; dictation/prewarm also require the corresponding feature, retiring verified featureless v3 helpers under the startup lock. Do not change Swift or weaken macOS capture/apply behavior.
 
@@ -106,6 +108,7 @@ Platform installers seed only missing prompts and settings. Never overwrite user
 - `linux/install` — idempotent install and non-destructive `--check`.
 - `linux/bin/word-fixer` — single-instance client entry point.
 - `linux/bin/word-fixer-dictate`, `linux/lib/dictate.mjs` — bounded stdin/stdout dictation, guard and detached prewarm.
+- `linux/lib/dictation-warning.mjs` — rate-limited fallback notification for failed dictations.
 - `shared/prompts/DICTATION.md` — transcript-only repair contract.
 - `linux/hypr/word-fixer.lua` — source capture and deferred external-client launch only; no clipboard or input injection.
 - `linux/lib/events.mjs` — v1 event builders, bounded target capture, opt-in detached hook and local NDJSON log.
