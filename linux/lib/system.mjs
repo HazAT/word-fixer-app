@@ -341,8 +341,8 @@ export class LinuxSystem {
     );
   }
 
-  async modifiersHeld({ signal } = {}) {
-    const result = await this.command('hyprctl', ['repl', MODIFIERS_HELD_QUERY], { signal });
+  async modifiersHeld({ signal, timeoutMs } = {}) {
+    const result = await this.command('hyprctl', ['repl', MODIFIERS_HELD_QUERY], { signal, timeoutMs });
     const answer = result.stdout.toString('utf8').trim();
     if (answer === 'true') return true;
     if (answer === 'false') return false;
@@ -354,7 +354,7 @@ export class LinuxSystem {
   // binds may fire before those modifiers are up.
   async waitForModifierRelease(action, { signal } = {}) {
     const deadline = Date.now() + this.modifierReleaseTimeoutMs;
-    while (await this.modifiersHeld({ signal })) {
+    while (await this.modifiersHeld({ signal, timeoutMs: Math.max(1, deadline - Date.now()) })) {
       if (Date.now() >= deadline) {
         throw new Error(`Refusing to ${action} while modifier keys are held.${
           action === 'paste' ? ' The correction is on the clipboard.' : ''}`);

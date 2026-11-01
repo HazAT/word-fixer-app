@@ -559,9 +559,11 @@ test('Linux copy and paste wait until the trigger modifiers are released', async
     const calls = [];
     let heldPolls = 2;
     const system = new LinuxSystem({
-      command: async (executable, args) => {
+      command: async (executable, args, options = {}) => {
         calls.push(args[0] === 'repl' ? 'repl' : args[1]?.match(/state = '(\w+)'/)?.[1] ?? args[0]);
         if (args[0] === 'repl') {
+          // Each poll is bounded by the remaining release deadline.
+          assert.ok(options.timeoutMs > 0 && options.timeoutMs <= 1_500);
           assert.match(args[1], /^return hl\.is_key_down\(50\) or .*hl\.is_key_down\(133\)/);
           return { stdout: Buffer.from(heldPolls-- > 0 ? 'true' : 'false'), stderr: '' };
         }
