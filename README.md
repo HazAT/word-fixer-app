@@ -151,8 +151,10 @@ The product installer enables the overlay and client but does not edit personal 
 hl.unbind("SUPER + SHIFT + C")
 o.bind("SUPER + SHIFT + C", "Word Fixer", function()
   dofile((os.getenv("HOME") or "") .. "/.config/omarchy/plugins/hazat.word-fixer/linux/hypr/word-fixer.lua").capture()
-end, { release = true })
+end)
 ```
+
+Bind on press, not `{ release = true }`: Hyprland 0.57 passes the C of a release bind through to the source window, which replaces the selection. The client waits until Super and Shift are released before it copies.
 
 Reload and inspect the live binding:
 

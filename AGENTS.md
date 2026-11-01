@@ -32,7 +32,7 @@ Never paste into a changed or unverified window. On refusal, keep the correction
 
 Normal windows use Ctrl+C/Ctrl+V. Windows tagged `terminal` use Ctrl+Insert/Shift+Insert. Omarchy capture clears the previous clipboard; rich MIME restoration is intentionally unsupported.
 
-Never clear the clipboard or inject copy from inside the triggering Hyprland Lua key callback. The callback captures source metadata and returns; the external single-instance client then verifies the target, clears the clipboard, and dispatches copy. Bind on key release so trigger state is settled before client launch. Release binds can fire while Super+Shift are still down (Hyprland 0.57), and Chrome copies nothing under held Super+Shift, so copy and paste both first poll `hl.is_key_down` on the modifier keycodes via `hyprctl repl` and refuse after the timeout.
+Never clear the clipboard or inject copy from inside the triggering Hyprland Lua key callback. The callback captures source metadata and returns; the external single-instance client then verifies the target, clears the clipboard, and dispatches copy. Bind on key press, not release: Hyprland 0.57 no longer consumes the C press of a single-key release bind, so the source window receives a typed `C` that replaces the selection before copy. Because the trigger modifiers are still down at launch (and Chrome copies nothing under held Super+Shift), copy and paste both first poll `hl.is_key_down` on the modifier keycodes via `hyprctl repl` and refuse after the timeout.
 
 ### Pi runtime is fixed and isolated
 
@@ -142,7 +142,7 @@ The product installer does not edit personal bindings. Managed config must expli
 hl.unbind("SUPER + SHIFT + C")
 o.bind("SUPER + SHIFT + C", "Word Fixer", function()
   dofile((os.getenv("HOME") or "") .. "/.config/omarchy/plugins/hazat.word-fixer/linux/hypr/word-fixer.lua").capture()
-end, { release = true })
+end)
 ```
 
 Verify with:
