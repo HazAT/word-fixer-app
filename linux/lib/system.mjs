@@ -10,6 +10,11 @@ import { delay } from './runtime.mjs';
 import { targetMatches } from './target.mjs';
 
 const HELPER_API_VERSION = 3;
+// evdev+8 keycodes of Shift, Control, Alt/AltGr and Super on both sides. Keycodes,
+// unlike keysyms, do not depend on the active layout.
+const MODIFIER_KEYCODES = Object.freeze([50, 62, 37, 105, 64, 108, 133, 134]);
+const MODIFIERS_HELD_QUERY = `return ${MODIFIER_KEYCODES.map((code) => `hl.is_key_down(${code})`).join(' or ')}`;
+const MODIFIER_RELEASE_TIMEOUT_MS = 1_500;
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
 function commandError(command, args, stderr, code) {
@@ -313,9 +318,14 @@ export class HelperClient {
 }
 
 export class LinuxSystem {
-  constructor({ helper = new HelperClient(), command = runCommand } = {}) {
+  constructor({
+    helper = new HelperClient(),
+    command = runCommand,
+    modifierReleaseTimeoutMs = MODIFIER_RELEASE_TIMEOUT_MS,
+  } = {}) {
     this.helper = helper;
     this.command = command;
+    this.modifierReleaseTimeoutMs = modifierReleaseTimeoutMs;
   }
 
   async getActiveWindow({ signal } = {}) {
@@ -331,8 +341,31 @@ export class LinuxSystem {
     );
   }
 
+  async modifiersHeld({ signal } = {}) {
+    const result = await this.command('hyprctl', ['repl', MODIFIERS_HELD_QUERY], { signal });
+    const answer = result.stdout.toString('utf8').trim();
+    if (answer === 'true') return true;
+    if (answer === 'false') return false;
+    throw new Error(`Could not read held modifier keys from Hyprland: ${answer}`);
+  }
+
+  // Synthetic chords are unreliable while the user still holds the trigger
+  // modifiers (Chrome copies nothing under a held Super+Shift), and release
+  // binds may fire before those modifiers are up.
+  async waitForModifierRelease(action, { signal } = {}) {
+    const deadline = Date.now() + this.modifierReleaseTimeoutMs;
+    while (await this.modifiersHeld({ signal })) {
+      if (Date.now() >= deadline) {
+        throw new Error(`Refusing to ${action} while modifier keys are held.${
+          action === 'paste' ? ' The correction is on the clipboard.' : ''}`);
+      }
+      await delay(25, signal);
+    }
+  }
+
   async copy(sourceWindow, target, { signal } = {}) {
     const [down, up] = clipboardKeyEvents('copy', sourceWindow);
+    await this.waitForModifierRelease('copy', { signal });
     const current = await this.getActiveWindow({ signal });
     if (!targetMatches(target, current)) {
       throw new Error('Refusing to copy because the source window lost focus.');
@@ -423,6 +456,7 @@ export class LinuxSystem {
 
   async paste(sourceWindow, target, { signal } = {}) {
     const [down, up] = clipboardKeyEvents('paste', sourceWindow);
+    await this.waitForModifierRelease('paste', { signal });
     const current = await this.getActiveWindow({ signal });
     if (!targetMatches(target, current)) {
       throw new Error('Refusing to paste because the source window lost focus.');

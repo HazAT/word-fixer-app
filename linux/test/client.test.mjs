@@ -499,6 +499,7 @@ test('Linux copy and paste dispatch verify the exact target and emit installed c
   const mismatchedSystem = new LinuxSystem({
     command: async (executable, args) => {
       mismatchedCalls.push({ executable, args });
+      if (args[0] === 'repl') return { stdout: Buffer.from('false'), stderr: '' };
       return {
         stdout: Buffer.from(JSON.stringify({ ...normalWindow, pid: 9999 })),
         stderr: '',
@@ -525,6 +526,7 @@ test('Linux copy and paste dispatch verify the exact target and emit installed c
     const command = async (executable, args) => {
       calls.push({ executable, args });
       if (args[0] === '-j') return { stdout: Buffer.from(JSON.stringify(source)), stderr: '' };
+      if (args[0] === 'repl') return { stdout: Buffer.from('false'), stderr: '' };
       return { stdout: Buffer.alloc(0), stderr: '' };
     };
     const system = new LinuxSystem({ command });
@@ -544,6 +546,45 @@ test('Linux copy and paste dispatch verify the exact target and emit installed c
     assert.match(dispatches[1].args[1], new RegExp(`mods = '${expectedCopy[0]}'.*key = '${expectedCopy[1]}'.*state = 'up'`));
     assert.match(dispatches[2].args[1], new RegExp(`mods = '${expectedPaste[0]}'.*key = '${expectedPaste[1]}'.*state = 'down'`));
     assert.match(dispatches[3].args[1], new RegExp(`mods = '${expectedPaste[0]}'.*key = '${expectedPaste[1]}'.*state = 'up'`));
+  }
+});
+
+test('Linux copy and paste wait until the trigger modifiers are released', async () => {
+  const target = {
+    address: normalWindow.address.toLowerCase(),
+    pid: normalWindow.pid,
+    initialClass: normalWindow.initialClass,
+  };
+  for (const action of ['copy', 'paste']) {
+    const calls = [];
+    let heldPolls = 2;
+    const system = new LinuxSystem({
+      command: async (executable, args) => {
+        calls.push(args[0] === 'repl' ? 'repl' : args[1]?.match(/state = '(\w+)'/)?.[1] ?? args[0]);
+        if (args[0] === 'repl') {
+          assert.match(args[1], /^return hl\.is_key_down\(50\) or .*hl\.is_key_down\(133\)/);
+          return { stdout: Buffer.from(heldPolls-- > 0 ? 'true' : 'false'), stderr: '' };
+        }
+        if (args[0] === '-j') return { stdout: Buffer.from(JSON.stringify(normalWindow)), stderr: '' };
+        return { stdout: Buffer.alloc(0), stderr: '' };
+      },
+    });
+    await system[action](normalWindow, target);
+    assert.deepEqual(calls, ['repl', 'repl', 'repl', '-j', 'down', 'up']);
+
+    const stuckCalls = [];
+    const stuck = new LinuxSystem({
+      modifierReleaseTimeoutMs: 60,
+      command: async (executable, args) => {
+        stuckCalls.push(args[0]);
+        return { stdout: Buffer.from(args[0] === 'repl' ? 'true' : JSON.stringify(normalWindow)), stderr: '' };
+      },
+    });
+    await assert.rejects(
+      () => stuck[action](normalWindow, target),
+      new RegExp(`Refusing to ${action} while modifier keys are held`),
+    );
+    assert.equal(stuckCalls.every((name) => name === 'repl'), true);
   }
 });
 

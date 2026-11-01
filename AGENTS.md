@@ -25,14 +25,14 @@ Capture the Hyprland source address, PID, initial class, and terminal classifica
 2. place the chosen correction on the plain-text clipboard;
 3. require the captured source to still exist;
 4. refocus and verify the same address, PID, and initial class;
-5. verify again immediately before input;
+5. wait (bounded, 1.5 s) until no Shift/Ctrl/Alt/Super key is physically held, then verify again immediately before input;
 6. only then dispatch paste.
 
 Never paste into a changed or unverified window. On refusal, keep the correction on the clipboard and notify the user. Cancellation and failures must not modify source text and must release request state and the single-instance lock.
 
 Normal windows use Ctrl+C/Ctrl+V. Windows tagged `terminal` use Ctrl+Insert/Shift+Insert. Omarchy capture clears the previous clipboard; rich MIME restoration is intentionally unsupported.
 
-Never clear the clipboard or inject copy from inside the triggering Hyprland Lua key callback. The callback captures source metadata and returns; the external single-instance client then verifies the target, clears the clipboard, and dispatches copy. Bind on key release so trigger state is settled before client launch.
+Never clear the clipboard or inject copy from inside the triggering Hyprland Lua key callback. The callback captures source metadata and returns; the external single-instance client then verifies the target, clears the clipboard, and dispatches copy. Bind on key release so trigger state is settled before client launch. Release binds can fire while Super+Shift are still down (Hyprland 0.57), and Chrome copies nothing under held Super+Shift, so copy and paste both first poll `hl.is_key_down` on the modifier keycodes via `hyprctl repl` and refuse after the timeout.
 
 ### Pi runtime is fixed and isolated
 
