@@ -462,13 +462,15 @@ export async function reviewText({
     controller.abort(new ReviewTimeoutError(timeoutMs));
   }, timeoutMs);
 
-  const taskOptions = [
-    { name: 'correction', systemPrompt: services.prompts.correction, preserveLineBreaks: true },
-    { name: 'natural', systemPrompt: services.prompts.natural, preserveLineBreaks: true },
-    { name: 'feedback', systemPrompt: services.prompts.feedback, preserveLineBreaks: false },
-  ];
-
   try {
+    const vocabulary = await readVocabulary(services.piDir, controller.signal);
+    const withVocabulary = (prompt) => (vocabulary === undefined ? prompt : `${prompt}\n\n${REVIEW_VOCABULARY_INTRO}\n${vocabulary}`);
+    const taskOptions = [
+      { name: 'correction', systemPrompt: withVocabulary(services.prompts.correction), preserveLineBreaks: true },
+      { name: 'natural', systemPrompt: withVocabulary(services.prompts.natural), preserveLineBreaks: true },
+      { name: 'feedback', systemPrompt: services.prompts.feedback, preserveLineBreaks: false },
+    ];
+
     const settled = await Promise.allSettled(taskOptions.map(async (task) => {
       try {
         const result = await runTextTask({
@@ -506,6 +508,18 @@ export async function reviewText({
   } finally {
     clearTimeout(timeout);
     signal?.removeEventListener('abort', cancel);
+  }
+}
+
+const REVIEW_VOCABULARY_INTRO = 'Vocabulary (names and terms the writer uses; spell each exactly as listed. Text in parentheses is a known misspelling or mishearing of that term; restore the listed spelling where the text clearly means the term. Never rewrite a correct word just because it resembles a listed term, and never add or substitute terms the text does not use):';
+
+// The optional user vocabulary is read on every call so edits need no helper restart; missing means none.
+async function readVocabulary(piDir, signal) {
+  try {
+    return await raceWithAbort(fs.readFile(path.join(piDir, 'VOCABULARY.md'), 'utf8'), signal);
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+    return undefined;
   }
 }
 
@@ -569,11 +583,9 @@ export async function dictateText({
       if (error.code === 'ENOENT') throw new Error('Missing DICTATION.md. Run the Word Fixer installer again.');
       throw error;
     }
-    try {
-      const vocabulary = await raceWithAbort(fs.readFile(path.join(services.piDir, 'VOCABULARY.md'), 'utf8'), controller.signal);
+    const vocabulary = await readVocabulary(services.piDir, controller.signal);
+    if (vocabulary !== undefined) {
       prompt += `\n\nVocabulary (terms the speaker uses; known mishearings in parentheses):\n${vocabulary}`;
-    } catch (error) {
-      if (error.code !== 'ENOENT') throw error;
     }
     if (typeof context === 'string' && context.trim()) {
       let clamped = Buffer.from(context, 'utf8').subarray(0, 4096).toString('utf8');

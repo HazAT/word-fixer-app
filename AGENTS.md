@@ -55,7 +55,7 @@ The one notification is the fallback warning in `linux/lib/dictation-warning.mjs
 
 Helper API remains v3 with additive `features: ["dictate", "prewarm"]` in health and helper state. Reviews require only a healthy v3 helper; dictation/prewarm also require the corresponding feature, retiring verified featureless v3 helpers under the startup lock. Do not change Swift or weaken macOS capture/apply behavior.
 
-Load `DICTATION.md` and optional user `VOCABULARY.md` lazily on every call, never in `loadPiServices`. The macOS installer does not seed the dictation prompt. Linux installers seed only missing `DICTATION.md` and never create or modify vocabulary.
+Load `DICTATION.md` and optional user `VOCABULARY.md` lazily on every call, never in `loadPiServices`. Reviews also read `VOCABULARY.md` lazily on every call and append it to the correction and natural prompts only (not the takeaway); a missing file means no vocabulary, any other read error fails the review. The macOS installer does not seed the dictation prompt. Linux installers seed only missing `DICTATION.md` and never create or modify vocabulary.
 
 ### Linux event hooks
 

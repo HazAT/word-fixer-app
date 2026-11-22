@@ -237,7 +237,7 @@ ExampleProduct (example product)
 ExampleLibrary (example library)
 ```
 
-Both files are read on each dictation, so edits need no helper restart. The installer never creates or modifies vocabulary. `VOXTYPE_CONTEXT` supplies up to 4 KiB of previous dictation as context only, never as output.
+Both files are read on each dictation, so edits need no helper restart. Reviews on both platforms also read the vocabulary on each call and give it to the Light edit and Natural English sessions as names and terms to spell exactly as listed (the Takeaway does not use it). The installer never creates or modifies vocabulary. `VOXTYPE_CONTEXT` supplies up to 4 KiB of previous dictation as context only, never as output.
 
 Optional `config.json` settings:
 
@@ -266,7 +266,7 @@ Both frontends respect `XDG_CONFIG_HOME` and `XDG_DATA_HOME`; Omarchy also uses 
     ├── NATURAL.md              # natural-English prompt
     ├── FEEDBACK.md             # takeaway prompt
     ├── DICTATION.md            # Linux dictation prompt, loaded lazily
-    ├── VOCABULARY.md           # optional user vocabulary, never seeded
+    ├── VOCABULARY.md           # optional user vocabulary (dictation and reviews), never seeded
     ├── settings.json           # dedicated provider/model/thinking settings
     └── models.json             # optional app-specific custom model definitions
 

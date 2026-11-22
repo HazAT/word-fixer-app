@@ -147,6 +147,44 @@ test('dictation lazily reloads prompts and uses one fresh isolated Luna session 
   assert.ok(sessions.every((session) => session.disposed === 1));
 });
 
+test('reviewText re-reads the optional vocabulary for correction and natural on every call', async (t) => {
+  const piDir = await fs.mkdtemp(path.join(os.tmpdir(), 'wf-review-vocabulary-'));
+  t.after(() => fs.rm(piDir, { recursive: true, force: true }));
+  const { services, sessions } = reviewServices();
+  services.piDir = piDir;
+  const prompts = [];
+  services.createResourceLoader = async (systemPrompt) => {
+    prompts.push(systemPrompt);
+    return { systemPrompt };
+  };
+  const options = { services, text: 'Text', cwd: '/tmp', log: { async log() {} } };
+  const promptFor = (name) => prompts.find((prompt) => prompt.startsWith(services.prompts[name]));
+
+  await reviewText(options);
+  assert.equal(prompts.length, 3);
+  assert.ok(prompts.every((prompt) => !prompt.includes('Vocabulary')));
+
+  await fs.writeFile(path.join(piDir, 'VOCABULARY.md'), 'ExampleTerm (example term)');
+  prompts.length = 0;
+  await reviewText(options);
+  for (const name of ['correction', 'natural']) {
+    assert.match(promptFor(name), /\n\nVocabulary \(names and terms the writer uses; spell each exactly as listed\.[^\n]*\):\nExampleTerm \(example term\)/);
+  }
+  assert.equal(promptFor('feedback'), 'FEEDBACK PROMPT');
+
+  await fs.writeFile(path.join(piDir, 'VOCABULARY.md'), 'OtherTerm');
+  prompts.length = 0;
+  await reviewText(options);
+  assert.match(promptFor('correction'), /\nOtherTerm\n/);
+  assert.doesNotMatch(promptFor('correction'), /ExampleTerm/);
+
+  await fs.rm(path.join(piDir, 'VOCABULARY.md'));
+  await fs.mkdir(path.join(piDir, 'VOCABULARY.md'));
+  await assert.rejects(reviewText(options), /EISDIR/);
+  assert.equal(sessions.length, 9);
+  assert.ok(sessions.every((session) => session.disposed === 1));
+});
+
 test('dictation disposes on failure, timeout and caller cancellation', async (t) => {
   const piDir = await fs.mkdtemp(path.join(os.tmpdir(), 'wf-dictation-'));
   t.after(() => fs.rm(piDir, { recursive: true, force: true }));
